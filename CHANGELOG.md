@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+- Apply refuses a change that adds a git repository inside the project (a model's test fixtures or a stray
+  clone), which git would otherwise commit as a broken link.
+
 ## 0.1.0 (first public release)
 - Chat with models on one or more OpenCode servers, from desktop or phone (installable, with notifications).
 - Project chats work on a git copy: test, review, then apply to the real project as one commit.

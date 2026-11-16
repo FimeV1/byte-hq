@@ -274,6 +274,16 @@ export function createCopies({ backends, projects, credit = {}, log = console.lo
       await must(wt, "git add -A", "staging the copy");
       const files = (await must(wt, "git diff --cached --name-only HEAD", "listing changes")).split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
       if (!files.length) throw new Error("the copy has no changes");
+      // A git repository inside the copy (a model's test fixtures, a stray clone) is staged as an embedded repo:
+      // just a pointer, committed as a broken link, and published if the project is pushed (2026-11-16: a copy chat
+      // left eight test repos loose in dev/). Refuse new ones; changes to existing submodules are fine.
+      const embedded = (await must(wt, "git diff --cached --raw HEAD", "checking for repositories inside the copy"))
+        .split(/\r?\n/).map((l) => l.match(/^:(\d{6}) 160000 \S+ \S+ \S+\t(.+)$/)).filter((m) => m && m[1] !== "160000").map((m) => m[2]);
+      if (embedded.length) {
+        throw new Error(`this change adds ${embedded.length === 1 ? "a git repository" : embedded.length + " git repositories"} inside the project ` +
+          `(${embedded.slice(0, 5).join(", ")}${embedded.length > 5 ? ", …" : ""}), which would be committed as a broken link. ` +
+          "Ask the chat to delete them or move them into a git-ignored folder, then apply again.");
+      }
       const patch = `${c.base.replace(/[\\/]+$/, "")}${isWindows(c.base) ? "\\" : "/"}.git${isWindows(c.base) ? "\\" : "/"}hq-apply.patch`;
       await must(wt, `git diff --cached --binary HEAD --output=${q(patch)}`, "making the patch");
       // Everything that can fail without touching the live project happens first.
