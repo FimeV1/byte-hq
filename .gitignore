@@ -1,0 +1,16 @@
+node_modules
+dist/
+dev/xdg/data/
+dev/xdg/state/
+dev/xdg/cache/
+dev/xdg/browser-profile/
+dev/*.log
+dev/hq.pid
+dev/project/*
+!dev/project/.gitkeep
+hq.pid
+NOTES.local.md
+dev/models/
+dev/media/
+dev/xdg/config/opencode/opencode.json
+dev/config.dev.json.bak

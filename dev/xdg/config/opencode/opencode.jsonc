@@ -1,0 +1,18 @@
+// DEV ONLY: an isolated OpenCode 2.x server (127.0.0.1:4298) whose only models are the scripted mock in
+// ../../../mock_model.py, so HQ can be tested without loading any real model.
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "main":   { "npm": "@ai-sdk/openai-compatible", "name": "Mock main", "options": { "baseURL": "http://127.0.0.1:4299/v1", "apiKey": "none" },
+                "models": { "mock-main": { "name": "Mock main model", "reasoning": true, "tool_call": true, "limit": { "context": 32768, "output": 4096 } } } },
+    "backup": { "npm": "@ai-sdk/openai-compatible", "name": "Mock backup", "options": { "baseURL": "http://127.0.0.1:4299/v1", "apiKey": "none" },
+                "models": { "mock-backup": { "name": "Mock backup model", "reasoning": true, "tool_call": true, "limit": { "context": 32768, "output": 4096 } } } },
+    "mock":   { "npm": "@ai-sdk/openai-compatible", "name": "Mock", "options": { "baseURL": "http://127.0.0.1:4299/v1", "apiKey": "none" },
+                "models": { "mock": { "name": "Mock Model 1B", "reasoning": true, "tool_call": true, "limit": { "context": 32768, "output": 4096 } } } }
+  },
+  "model": "mock/mock",
+  "small_model": "mock/mock",
+  "autoupdate": false,
+  "disabled_providers": ["opencode"],
+  "permission": { "bash": { "*": "allow", "rm -rf *": "ask" } }
+}

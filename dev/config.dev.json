@@ -1,0 +1,26 @@
+{
+  "name": "HQ",
+  "listen": [{ "host": "127.0.0.1", "port": 4112 }],
+  "projectsFile": "dev/projects.dev.json",
+  "backends": [
+    {
+      "id": "dev",
+      "label": "Dev (mock model)",
+      "url": "http://127.0.0.1:4298",
+      "user": "opencode",
+      "password": "dev",
+      "home": "./project",
+      "chatsDir": "./project"
+    }
+  ],
+  "browser": { "port": 9336, "profile": "./xdg/browser-profile" },
+  "health": { "mock": "http://127.0.0.1:4299/v1/models" },
+  "auto": {
+    "primary": { "providerID": "main", "modelID": "mock-main", "label": "Main model" },
+    "fallback": {
+      "providerID": "backup", "modelID": "mock-backup", "label": "Backup model",
+      "unload": { "statusUrl": "http://127.0.0.1:4299/fallback/status", "offUrl": "http://127.0.0.1:4299/fallback/off", "token": "devtoken" }
+    },
+    "fakeState": { "up": true, "busy": false, "reason": "" }
+  }
+}
