@@ -45,5 +45,8 @@ For behaviour: `sh dev/run_dev_backend.sh`, then `sh dev/restart_hq.sh`, open ht
 - Keep README.md and CONFIG.md true in the same change that alters what they describe.
 - Colours only through the tokens at the top of `src/styles.css`, and every new token in both themes (dark and light).
 - No inline `<script>` or `on…=` handlers: the Content-Security-Policy (server.mjs) blocks them.
+- Test fixtures that are git repos go under `dev/throwaway/` (git-ignored). A repo anywhere else in this tree gets
+  committed as an embedded repo: check `git status --short` before you finish.
+- In a copy, `NOTES.local.md` doesn't exist (it's git-ignored): don't go looking for it elsewhere.
 - Copies and Auto exist because models make mistakes: never weaken the copy guard, the review, or the permission
   rules to make something easier.
