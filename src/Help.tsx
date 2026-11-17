@@ -94,6 +94,12 @@ export function ByteHelpDialog() {
         for coding and need <b>tool access</b>: without it the models can chat but can't read or edit files or run commands.
       </p>
 
+      <div className="field-label">What it's for</div>
+      <p className="help-p">
+        Chat and quick coding help: questions, small fixes, short tasks. On paid keys each request is capped at about 32,000 tokens and
+        a key runs one request at a time, so long agent sessions that read a whole project need another model. You can pick the model per chat.
+      </p>
+
       <div className="field-label">It chats, but never edits files</div>
       <p className="help-p">
         Your key has no tool access yet. Press <b>Ask for tool access</b> under “Your key” above: it's turned on by hand, and you keep the same key.

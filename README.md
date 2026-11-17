@@ -78,6 +78,8 @@ In HQ, **Settings › Models** (or **Add models…** in the model menu):
 Set each model's **context** to what the server really runs it with: HQ uses it to decide when to summarise a long
 chat. Coding needs a model that supports tool calls: press **Test** to check (HQ also tests each model it adds).
 A Byte API key needs **tool access** for coding; ask for it when you request the key, or later with one button in **Settings › Byte API help**.
+The Byte API is made for chat and quick coding help: on paid keys each request is capped at about 32,000 tokens and runs one
+at a time, so use another model for long agent sessions.
 
 ### Use it from your phone
 HQ listens on `127.0.0.1` by default. To reach it from other devices, put HTTPS in front of it, for example with
