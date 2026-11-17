@@ -28,7 +28,8 @@
   told to carry on (for setups that turn off OpenCode's own compaction, or whose long chats get slow before they're
   full).
 - A review that runs out of room is run again on the other Auto model when that one has a bigger window, instead of
-  being lost.
+  being lost. A review that ends without a verdict (empty, crashed, or only OpenCode's compaction summary) is
+  reported as "the review gave no verdict", never as "review looks good".
 - **Review checklists** (`review-checklists.md`): a change to guard-type code (push hooks, secret scanners, permission
   checks, logins) gets a review that must try the known ways around it, and ask for a real test of any it can't rule
   out. Reviewers are also told to check the change's docs and comments against the code, and to read only the lines
