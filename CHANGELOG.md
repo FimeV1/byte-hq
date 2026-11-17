@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.1
+- **One-command install** for macOS and Linux:
+  `curl -fsSL https://raw.githubusercontent.com/FimeV1/byte-hq/main/install.sh | bash`. It checks git and Node.js,
+  installs OpenCode 2 if it's missing (asks before replacing OpenCode 1), downloads or updates HQ, starts an OpenCode
+  server with a generated password, runs setup with that server filled in, builds and offers to start HQ. Never uses
+  sudo; run it again to update.
+- `run_opencode.sh`: starts an OpenCode server for HQ in the background; its password is kept in
+  `~/.config/hq-app/opencode.env` (readable only by you).
+- HQ started with `run_hq.sh` no longer stops when the terminal that started it closes (Node.js undoes `nohup`).
+- `run_hq.sh` stops the previous HQ only if that process id still belongs to HQ.
+- README: install OpenCode 2 with its v2 installer; the plain installer and npm still give OpenCode 1.
+
 ## 0.2.0
 - Settings › Git: every project's git state at a glance — whether the folder is a repository, its branch, its remote
   (Public/Private for GitHub remotes), commits ahead of and behind the last fetch, uncommitted files, and the problems

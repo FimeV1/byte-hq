@@ -83,9 +83,12 @@ async function addMachine(n) {
   if (n === 1) say("  (On another computer add --hostname 0.0.0.0, and keep it on a private network such as Tailscale.)");
   for (;;) {
     const label = await ask("  Name to show in HQ", n === 1 ? "This computer" : `Machine ${n}`);
-    const url = await ask("  OpenCode server address", "http://127.0.0.1:4096");
+    // install.sh starts the first OpenCode server itself and passes its address and password here, so the user
+    // never has to copy the password. Only for machine 1; anything typed wins.
+    const pre = n === 1 && process.env.HQ_SETUP_OPENCODE_PASSWORD ? { url: process.env.HQ_SETUP_OPENCODE_URL || "http://127.0.0.1:4096", password: process.env.HQ_SETUP_OPENCODE_PASSWORD } : null;
+    const url = await ask("  OpenCode server address", pre?.url || "http://127.0.0.1:4096");
     const user = await ask("  Username (OpenCode's default is opencode)", "opencode");
-    const password = await askSecret("  Password (OPENCODE_SERVER_PASSWORD; leave empty if none)");
+    const password = (await askSecret(pre ? "  Password (leave empty to use the one the installer set)" : "  Password (OPENCODE_SERVER_PASSWORD; leave empty if none)")) || (pre && url === pre.url ? pre.password : "");
     try {
       const info = (await openCode(url, user, password, "/info")).data ?? (await openCode(url, user, password, "/info"));
       say(`  ✓ Connected: ${info.hostname || "server"} · OpenCode ${info.version || "?"}`);

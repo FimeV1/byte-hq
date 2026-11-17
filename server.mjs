@@ -40,6 +40,9 @@ if (Number(process.versions.node.split(".")[0]) < 22) {
   console.error(`HQ needs Node.js 22 or newer (this is ${process.version}).`);
   process.exit(1);
 }
+// Started in the background by run_hq.sh: keep running when the terminal that started it closes. Node resets the
+// "ignore hang-up" that nohup sets, so without a handler HQ died with the terminal window (2026-11-17).
+if (process.env.HQ_DETACHED === "1") process.on("SIGHUP", () => {});
 if (!fs.existsSync(CONFIG_PATH)) {
   console.error(`No HQ config at ${CONFIG_PATH}.\nRun \`npm run setup\` first (or set HQ_CONFIG to your config file).`);
   process.exit(1);

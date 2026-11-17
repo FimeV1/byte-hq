@@ -40,7 +40,19 @@ Run one OpenCode server on each computer you want to work on, and HQ puts them a
 - **Extras:** saved prompts (type **/**), voice conversation, a shared browser the agent and you both drive, search
   across all chats, and a list of your important links and logins.
 
-## Get started (about 10 minutes)
+## Get started (about 5 minutes)
+You need [Node.js](https://nodejs.org) 22 or newer and git. On macOS or Linux, one command does the rest:
+```sh
+curl -fsSL https://raw.githubusercontent.com/FimeV1/byte-hq/main/install.sh | bash
+```
+It installs [OpenCode](https://opencode.ai) 2 if you don't have it (and asks before replacing OpenCode 1), downloads
+HQ to `~/hq` (`HQ_DIR=…` to choose), starts an OpenCode server on this computer with a generated password, runs
+setup (which picks up that server by itself), builds HQ and offers to start it. It never uses `sudo`. Run it again
+to update. A new OpenCode comes with a few free cloud models, so you can try HQ before adding your own (Settings ›
+Models). Prefer to read it first? `curl -fsSLO https://raw.githubusercontent.com/FimeV1/byte-hq/main/install.sh`,
+then `bash install.sh`.
+
+### By hand
 You need [Node.js](https://nodejs.org) 22 or newer, git, and [OpenCode](https://opencode.ai) **2.x** (tested with 2.2.7
 and 2.3.0).
 
@@ -96,7 +108,9 @@ Tailscale (`tailscale serve --bg 4110`), Caddy or nginx. Then open it on your ph
 turn on notifications in **Settings**.
 
 ### Keep it running
-`./run_hq.sh` starts HQ in the background (log: `~/hq-app.log`). To start it with the computer:
+`./run_opencode.sh` starts an OpenCode server on this computer in the background (port 4096; its password is kept in
+`~/.config/hq-app/opencode.env`, readable only by you; log: `~/hq-opencode.log`), and `./run_hq.sh` starts HQ the same way
+(log: `~/hq-app.log`). Both keep running when you close the terminal, until the computer restarts. To start HQ with the computer:
 
 <details><summary>Linux (systemd user service)</summary>
 
