@@ -24,6 +24,15 @@
   the commit.
 - Picking a smaller model for a big chat compacts it first, with the current model, so the next step fits.
 - When an Auto chat runs out of room partway through a turn, Auto compacts it and carries on (once per 10 minutes).
+- Optional `auto.midTurnAt`: a turn that grows past that many tokens is paused, the chat compacted, and the model
+  told to carry on (for setups that turn off OpenCode's own compaction, or whose long chats get slow before they're
+  full).
+- A review that runs out of room is run again on the other Auto model when that one has a bigger window, instead of
+  being lost.
+- **Review checklists** (`review-checklists.md`): a change to guard-type code (push hooks, secret scanners, permission
+  checks, logins) gets a review that must try the known ways around it, and ask for a real test of any it can't rule
+  out. Reviewers are also told to check the change's docs and comments against the code, and to read only the lines
+  they need.
 - After an OpenCode server restarts, open pages reconnect and catch up instead of silently stopping updates
   (no new steps or approval prompts until reloaded).
 - Apply refuses a change that adds a git repository inside the project (a model's test fixtures or a stray

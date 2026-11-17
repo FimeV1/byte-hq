@@ -44,6 +44,8 @@ const REVIEW_RULES = [
   { action: "glob", resource: "*", effect: "allow" },
 ];
 const MAX_FIX_ROUNDS = 2;
+// Known ways around guard-type code, added to reviews of changes that match (see the file itself).
+const CHECKLISTS = path.join(path.dirname(new URL(import.meta.url).pathname), "review-checklists.md");
 
 export function createAuto({ config, backends, log = console.log, notify = null, testCopy = null }) {
   const A = {
@@ -54,6 +56,7 @@ export function createAuto({ config, backends, log = console.log, notify = null,
     fallback: null,
     vision: null, // { url: Ollama-style /api/chat URL, model } — describes pictures for a primary that can't see them
     compactAt: 90_000,
+    midTurnAt: 0, // tokens partway through a turn that make Auto pause, compact and carry on; 0 = off (OpenCode's own compaction)
     fakeState: null,
     ...(config.auto || {}),
   };
@@ -192,15 +195,46 @@ export function createAuto({ config, backends, log = console.log, notify = null,
   }
 
   // ---- reviews --------------------------------------------------------------------------------
+  /**
+   * The review-checklists.md sections whose `when:` pattern matches this change's file names or added lines, as one
+   * text block, or "". Guard-type code (push hooks, secret scanners, permission checks) tends to pass a plain review
+   * with known kinds of holes; the checklist makes the reviewer try them. Read on every call so edits apply at once;
+   * a broken pattern only skips its own section.
+   */
+  function guardChecklist(files) {
+    let text;
+    try { text = fs.readFileSync(A.checklists || CHECKLISTS, "utf8"); } catch { return ""; }
+    files = files.filter((f) => !/\.(md|txt)$/i.test(f.file)); // docs describe guards; they aren't one
+    const hay = files.map((f) => f.file + "\n" + (f.patch || "").split("\n").filter((l) => l.startsWith("+")).join("\n")).join("\n");
+    const out = [];
+    for (const sec of text.split(/^## /m).slice(1)) {
+      const [title, ...rest] = sec.split("\n");
+      const when = rest.find((l) => l.startsWith("when:"))?.slice(5).trim();
+      let re = null;
+      try { re = when ? new RegExp(when, "i") : null; } catch { log(`review checklist "${title}": bad when: pattern`); }
+      if (re?.test(hay)) out.push(`${title.trim()}:\n${rest.filter((l) => l.startsWith("- ")).join("\n")}`);
+    }
+    return out.join("\n\n");
+  }
+
   function reviewPrompt(request, files, forCopy = false) {
     let diff = files.map((f) => `### ${f.file} (+${f.additions} -${f.deletions}, ${f.status})\n${f.patch}`).join("\n\n");
     if (diff.length > 60000) diff = diff.slice(0, 60000) + "\n\n[diff cut at 60,000 characters]";
+    const guard = guardChecklist(files);
     return [
       "You are reviewing a code change that another assistant made. You have not seen its conversation or reasoning, only the request and the result.",
       "", `The request it was given:\n"""\n${request.slice(0, 4000)}\n"""`, "", "The change (unified diff):", "```diff", diff, "```", "",
       "You can read and search the project's files to check surrounding code; you cannot change anything.",
+      "Your context window is limited: grep first, then read only the lines you need (offset/limit), not whole large files.",
       "Report only what matters: bugs, regressions, missed cases, things that don't do what was asked, and risks for a live system.",
-      "For each: the file and line, what is wrong, why, and the fix. Skip style nitpicks. Under 300 words.",
+      "Check every claim the change's docs, comments and changelog make against what the code really does.",
+      ...(guard
+        ? ["", "This change decides what is allowed or blocked, so reading it is not enough: TRY TO GET PAST IT. List the ways someone",
+           "could get around it: every relevant item below, plus any others you think of. For each, trace the code and say whether it",
+           "is caught. Any case you can't rule out by reading is a FIX: ask for a real test of that case (a throwaway repo or",
+           "script in an ignored folder such as dev/throwaway/) and for the fix if it fails. Known holes for this kind of code:", "", guard, ""]
+        : []),
+      `For each: the file and line, what is wrong, why, and the fix. Skip style nitpicks. Under ${guard ? 450 : 300} words.`,
       // The copy is committed to the live project as one git commit, and the chat title is often stale by
       // then, so the reviewer — which has just read the request and the whole diff —
       // writes the commit subject.
@@ -263,21 +297,65 @@ export function createAuto({ config, backends, log = console.log, notify = null,
     }
   }
 
+  /** The other Auto model (primary <-> fallback) when it's available and has a bigger context window than `pick`, else null. */
+  async function biggerReviewer(b, pick) {
+    const models = (await call(b, "GET", `/model?location[directory]=${encodeURIComponent(b.chatsDir || b.home || "/")}`)).data;
+    const find = (m) => m && models.find((x) => x.providerID === m.providerID && x.id === m.modelID);
+    const ctx = (m) => m?.limit?.context || 0;
+    const now = models.find((x) => x.providerID === pick.ref.providerID && x.id === pick.ref.id);
+    const role = pick.role === "primary" ? "fallback" : "primary";
+    const m = find(role === "primary" ? A.primary : A.fallback);
+    if (!m || (m.providerID === pick.ref.providerID && m.id === pick.ref.id) || ctx(m) <= ctx(now)) return null;
+    if (role === "primary") {
+      const s = await primaryState();
+      if (!s.up || s.busy) return null; // never start the primary just for a second try
+    }
+    return { ref: { id: m.id, providerID: m.providerID }, role, label: role === "primary" ? PRIMARY : FALLBACK, why: `the ${pick.label} review ran out of room` };
+  }
+
   /** Review one turn's changes in a read-only child chat, with the same model choice as the work. */
   async function reviewTurn(b, ses, turnId, request, files, whole = false) {
-    const pick = await pickModel(b);
+    let pick = await pickModel(b);
     if (!pick) return log(`auto ${ses.id}: no reviewer available`), null;
     const saved = pick.role === "primary" ? await slot("save") : false;
-    const fallbackBefore = pick.role === "fallback" ? await fallbackStatus() : null;
-    const child = (await call(b, "POST", "/session", {
-      location: ses.location, parentID: ses.id, model: pick.ref, permissions: REVIEW_RULES,
-      title: `Review: ${request.slice(0, 60)}`, metadata: { hqReview: true, turn: turnId, label: pick.label },
-    })).data;
-    log(`auto ${ses.id}: reviewing with ${pick.label} (${pick.why})`);
+    let fallbackBefore = pick.role === "fallback" ? await fallbackStatus() : null;
     const isCopy = !!ses.metadata?.hqCopy?.worktree;
-    await call(b, "POST", `/session/${child.id}/prompt`, { text: reviewPrompt(request, files, isCopy) });
-    await waitIdle(b, child.id);
-    const review = lastText((await call(b, "GET", `/session/${child.id}/message?limit=50`)).data.reverse());
+    const runReview = async (p) => {
+      const child = (await call(b, "POST", "/session", {
+        location: ses.location, parentID: ses.id, model: p.ref, permissions: REVIEW_RULES,
+        title: `Review: ${request.slice(0, 60)}`, metadata: { hqReview: true, turn: turnId, label: p.label },
+      })).data;
+      log(`auto ${ses.id}: reviewing with ${p.label} (${p.why})`);
+      await call(b, "POST", `/session/${child.id}/prompt`, { text: reviewPrompt(request, files, isCopy) });
+      await waitIdle(b, child.id);
+      return { child, msgs: (await call(b, "GET", `/session/${child.id}/message?limit=50`)).data.reverse() };
+    };
+    let { child, msgs } = await runReview(pick);
+    // After OpenCode compacts a review chat, its last text can be the compaction summary rather than a review: without
+    // a VERDICT line it is no review at all (it would otherwise read as "nothing to fix").
+    const reviewOf = (ms) => {
+      const t = lastText(ms);
+      return ms.some((m) => m.type === "compaction") && !/VERDICT:/i.test(t) ? "" : t;
+    };
+    let review = reviewOf(msgs);
+    // A reviewer that reads a lot of files can outgrow its window, and the review is lost. Run it again once on the
+    // other Auto model when that one has a bigger window; the failed review chat is unmarked so the review card shows
+    // the new one.
+    const err = [...msgs].reverse().find((m) => m.type === "assistant")?.error?.message || "";
+    const outgrew = /context size|exceeds the available context|context length|context window|too long/i.test(err) || msgs.some((m) => m.type === "compaction");
+    if (!review && outgrew) {
+      const other = await biggerReviewer(b, pick).catch((e) => (log(`auto ${ses.id}: ${e.message}`), null));
+      if (other) {
+        log(`auto ${ses.id}: the ${pick.label} review ran out of room (${err.slice(0, 80) || "its chat was compacted"}); reviewing again with ${other.label}`);
+        await setMeta(b, child.id, { hqReview: false }).catch(() => {});
+        if (other.role === "fallback" && !fallbackBefore) fallbackBefore = await fallbackStatus();
+        pick = other;
+        ({ child, msgs } = await runReview(pick));
+        review = reviewOf(msgs);
+      } else {
+        log(`auto ${ses.id}: the ${pick.label} review ran out of room and no Auto model with a bigger window is available`);
+      }
+    }
     // Commit subject for a copy: one line per reviewed turn, kept in the chat's metadata so Apply can use it.
     // The same turn can be reviewed twice (Auto and the review card), so keep the first. Saved straight after
     // the review is read: Apply only waits while the review chat is active, so a later save could miss it.
@@ -437,6 +515,13 @@ export function createAuto({ config, backends, log = console.log, notify = null,
       const where = b.label || b.id;
 
       const rounds = Number(meta.hqFixRounds || 0);
+      // No verdict (an empty review, or one cut short): say so, never "looks good", and send no fix round.
+      if (!/VERDICT:\s*(OK|FIX)/i.test(review || "")) {
+        log(`auto ${sid}: the ${pick.label} review gave no verdict`);
+        if (notify) notify(b, sid, ses, `Finished on the ${where} · the review gave no verdict: check the changes yourself`);
+        if (rounds) await setMeta(b, sid, { hqFixRounds: 0 });
+        return;
+      }
       const fix = /VERDICT:\s*FIX/i.test(review);
       if (notify && !(fix && rounds < MAX_FIX_ROUNDS)) {
         // One notification per job, when it's really done (not between fix rounds).
@@ -534,6 +619,51 @@ export function createAuto({ config, backends, log = console.log, notify = null,
   }
   for (const b of backends.values()) watch(b);
 
+  // ---- a turn that keeps growing -------------------------------------------------------------------
+  // OpenCode compacts a chat that's about to overflow by itself, unless its config says `"compaction": {"auto": false}`.
+  // With that off, or when long chats get slow well before they're full, set auto.midTurnAt: every 30 s, an Auto chat
+  // whose last step measured over midTurnAt tokens is stopped, compacted and told to carry on. Once per chat in
+  // 10 minutes, so a chat that compacts badly is left to you rather than looped. Off when midTurnAt is 0 or unset.
+  const midTurnDone = new Map(); // sid -> when
+  let midTurnRunning = false;
+  async function midTurnPass() {
+    if (midTurnRunning) return;
+    midTurnRunning = true;
+    try {
+      for (const b of backends.values()) {
+        if (b.removed) continue;
+        const active = await call1(b, "GET", "/session/active").then((r) => Object.keys(r.data || {})).catch(() => []);
+        for (const sid of active) {
+          if (busy.has(sid) || Date.now() - (midTurnDone.get(sid) || 0) < 600_000) continue;
+          const ses = await call1(b, "GET", `/session/${sid}`).then((r) => r.data).catch(() => null);
+          if (!ses?.metadata?.hqAuto || ses.parentID) continue;
+          const at = A.midTurnAt;
+          const ctx = await contextNow(b, sid).catch(() => 0);
+          if (ctx < at) continue;
+          midTurnDone.set(sid, Date.now());
+          log(`auto ${sid}: ${ctx} tokens partway through a turn (limit ${at}): stopping it to compact, then carrying on`);
+          busy.add(sid);
+          try {
+            await call(b, "POST", `/session/${sid}/interrupt`);
+            for (let i = 0; i < 24 && (await call1(b, "GET", "/session/active").then((r) => !!r.data?.[sid]).catch(() => false)); i++) {
+              await new Promise((r) => setTimeout(r, 5000));
+            }
+            await compactAndWait(b, sid);
+            await routeAndSend(b, sid, "Your turn grew too long, so it was paused and the chat compacted. Carry on from where " +
+              "you were: check the current state (git status, the files you were changing) rather than relying on memory, and read only what you need.", true);
+          } catch (e) {
+            log(`auto ${sid}: mid-turn compaction failed: ${e.message}; leaving it to you`);
+          } finally {
+            busy.delete(sid);
+          }
+        }
+      }
+    } finally {
+      midTurnRunning = false;
+    }
+  }
+  if (A.midTurnAt > 0) setInterval(() => midTurnPass().catch((e) => log(`mid-turn compaction: ${e.message}`)), 30_000).unref?.();
+
   const api = {
     /** True when Auto will review this chat's last turn (so the notifier leaves it to Auto). */
     /**
@@ -621,6 +751,8 @@ export function createAuto({ config, backends, log = console.log, notify = null,
     },
     /** Start watching a machine added while HQ runs (Settings › Servers). */
     watch,
+    _reviewPrompt: reviewPrompt, // for tests
+
   };
   return api;
 }

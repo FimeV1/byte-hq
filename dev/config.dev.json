@@ -21,6 +21,7 @@
       "providerID": "backup", "modelID": "mock-backup", "label": "Backup model",
       "unload": { "statusUrl": "http://127.0.0.1:4299/fallback/status", "offUrl": "http://127.0.0.1:4299/fallback/off", "token": "devtoken" }
     },
+    "midTurnAt": 8000,
     "fakeState": { "up": true, "busy": false, "reason": "" }
   }
 }

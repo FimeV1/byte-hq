@@ -102,7 +102,9 @@ HQ picks the model, reviews the work with a read-only reviewer, and sends fixes 
   "fallback": { "providerID": "ollama", "modelID": "big-model", "label": "Big model", "images": true,
                 "unload": { "statusUrl": "...", "offUrl": "...", "token": "..." } },
   "vision":   { "url": "http://localhost:11434/api/chat", "model": "a-vision-model" },
-  "compactAt": 90000
+  "compactAt": 90000,
+  "midTurnAt": 0,
+  "checklists": "review-checklists.md"
 }
 ```
 - **primary** does the work when it's available; **fallback** otherwise. Both name a model on your OpenCode servers.
@@ -114,6 +116,15 @@ HQ picks the model, reviews the work with a read-only reviewer, and sends fixes 
 - `llamaServerUrl` (optional): a llama-server started with `--slot-save-path`; its cache is saved around reviews.
 - `fallback.unload` (optional): unload the fallback after a review it was loaded only for.
 - `compactAt`: tokens in context before a primary turn compacts the chat first.
+- `midTurnAt` (optional, off by default): tokens partway through a turn at which Auto pauses the chat, compacts it
+  and tells the model to carry on (checked every 30 s, at most once per chat in 10 minutes). OpenCode already compacts
+  a chat that's about to overflow, so set this only if you turned that off (`"compaction": {"auto": false}` in
+  OpenCode's config) or if long chats get slow on your machine well before they're full.
+- `checklists` (optional): the review checklist file (default: `review-checklists.md` next to `auto.mjs`). A review of
+  a change that matches a section's `when:` pattern (push hooks, secret scanners, permission checks, logins…) must
+  also try that section's known ways around such code.
+- When a review runs out of room, it runs once more on the other Auto model if that one is available and has a bigger
+  context window.
 - `"auto": false` turns Auto off.
 
 ## Git

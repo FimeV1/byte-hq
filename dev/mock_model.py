@@ -12,6 +12,10 @@ Behaviour, chosen from the last user message:
                        or key without tool calling does (exercises the "can't edit files" help)
   "bigctx"          -> reports 120K tokens of context, then the next step is refused (HTTP 400, past the window)
   "newfile"         -> writes src/extra.js (a second file in another turn: whole-copy reviews)
+  "longturn"        -> reads README.md reporting 10K tokens (over the dev config's auto.midTurnAt, under OpenCode's own limit), then
+                       streams slowly (exercises mid-turn compaction)
+  "reviewbig" (with "edit") -> the main model's review is refused as too big (exercises the re-review on a bigger
+                       model: give mock-backup a bigger context in dev/xdg/config/opencode/opencode.jsonc to test it)
   anything else     -> short reasoning + a Markdown answer
 Requests without tools (title, summary) get a short plain answer.
 """
@@ -56,6 +60,8 @@ def plan(body):
         everything = " ".join(text_of(m) for m in msgs).lower()
         return [("text", "Retry failed requests in fetchJson" if "fetchjson" in everything else "Mock session title")]
     if "reviewing a code change" in last_user:
+        if "reviewbig" in last_user and body.get("model") == "mock-main":
+            return [("refuse", 33000)]  # the main model's review outgrows its window; a bigger backup gets it next
         if tool_results == 0 and "read" in tools:
             return [("reasoning", "Let me look at the file the diff touched."), ("tool", "read", {"path": "hello.txt"})]
         if "line 2b" in last_user and "+line 2b" in last_user:
@@ -115,6 +121,10 @@ def plan(body):
         return [("text", "I opened **example.com**. It is the IANA example page.")]
     if "stall" in last_user:
         return [("stall", 100), ("text", "Back after a long silence.")]
+    if "longturn" in last_user and "read" in tools:
+        if tool_results == 0:
+            return [("usage", 10000), ("tool", "read", {"path": "README.md"})]
+        return [("usage", 10200), ("slow", " ".join(f"word{i}" for i in range(400)))]
     if "slow" in last_user:
         return [("slow", " ".join(f"word{i}" for i in range(400)))]
     return [("reasoning", "A simple question. Answer briefly with some Markdown."),
