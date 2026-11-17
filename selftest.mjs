@@ -142,7 +142,7 @@ async function testBackend(b) {
     return;
   }
   line(true, "server reachable", `OpenCode ${info.version} on ${info.hostname}`);
-  if (info.version !== "2.2.7") console.log(`  note  HQ was built against OpenCode 2.2.7; this is ${info.version}. Failures below show what changed.`);
+  if (!["2.2.7", "2.3.0"].includes(info.version)) console.log(`  note  HQ was tested with OpenCode 2.2.7 and 2.3.0; this is ${info.version}. Failures below show what changed.`);
 
   await check(st, "API description lists every endpoint HQ uses", async () => {
     const spec = await api("GET", "/openapi.json");

@@ -41,15 +41,24 @@ Run one OpenCode server on each computer you want to work on, and HQ puts them a
   across all chats, and a list of your important links and logins.
 
 ## Get started (about 10 minutes)
-You need [Node.js](https://nodejs.org) 22 or newer, [OpenCode](https://opencode.ai) 2.x, and git.
+You need [Node.js](https://nodejs.org) 22 or newer, git, and [OpenCode](https://opencode.ai) **2.x** (tested with 2.2.7
+and 2.3.0).
 
-1. **Start an OpenCode server** on the computer the models should work on, with a password:
+1. **Install OpenCode 2** on the computer the models should work on (macOS or Linux):
+   ```sh
+   curl -fsSL https://opencode.ai/v2/install | bash
+   opencode --version   # should print 2.x; open a new terminal first if it isn't found
+   ```
+   Use the **v2** address: `opencode.ai/install` and `npm i -g opencode-ai` still give OpenCode 1, which HQ can't use.
+   If you already have OpenCode 1, this replaces it in `~/.opencode/bin` (`opencode upgrade --major` does the same);
+   see [OpenCode's v2 docs](https://opencode.ai/v2/docs) first if you rely on your OpenCode 1 setup.
+2. **Start an OpenCode server** there, with a password:
    ```sh
    OPENCODE_SERVER_PASSWORD=choose-a-password opencode serve --port 4096
    ```
    Add `--hostname 0.0.0.0` only if HQ runs on a different computer, and then only on a private network such as
    [Tailscale](https://tailscale.com). Never expose an OpenCode server to the internet.
-2. **Install HQ** and answer a few questions:
+3. **Install HQ** and answer a few questions:
    ```sh
    git clone https://github.com/FimeV1/byte-hq.git hq && cd hq
    npm install
@@ -57,13 +66,13 @@ You need [Node.js](https://nodejs.org) 22 or newer, [OpenCode](https://opencode.
    ```
    Setup tests the connection to each server, helps you add models if a server has none, and lets you pick the
    models Auto uses. Your settings go to `~/.config/hq-app/config.json`, readable only by you.
-3. **Build and start it:**
+4. **Build and start it:**
    ```sh
    npm run build
    npm start
    ```
    Open the address it prints (default http://127.0.0.1:4110) and sign in.
-4. **Make a project.** *New Project*, pick the folder of a git repository, and start a chat in it. HQ makes the copy
+5. **Make a project.** *New Project*, pick the folder of a git repository, and start a chat in it. HQ makes the copy
    for you.
 
 ### Models
