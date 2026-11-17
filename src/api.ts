@@ -67,6 +67,7 @@ export const hq = {
   gitRefresh: (project: string) => call<GitStatus>("/hq/git/refresh", { method: "POST", body: JSON.stringify({ project }) }),
   gitConnect: (project: string, url: string) => call<GitStatus>("/hq/git/connect", { method: "POST", body: JSON.stringify({ project, url }) }),
   gitCheckLogin: (project: string) => call<GitCheckLogin>("/hq/git/check-login", { method: "POST", body: JSON.stringify({ project }) }),
+  gitInstallGuard: (project: string) => call<GitStatus>("/hq/git/install-guard", { method: "POST", body: JSON.stringify({ project }) }),
   machines: () => call<Machine[]>("/hq/machines"),
   machineTest: (m: Partial<Machine> & { password?: string }) =>
     call<{ hostname: string; version: string; suggestHome: string }>("/hq/machines/test", { method: "POST", body: JSON.stringify(m) }),

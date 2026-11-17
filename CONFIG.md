@@ -132,6 +132,21 @@ A machine that isn't answering shows *can't reach \<machine\>* for its own rows 
   isn't trusted, no push permission, or the branch is behind (a non-fast-forward still means the login works; the branch
   just needs a pull or rebase). A dry run sends no files, so it can't check GitHub's rule that changing `.github/workflows`
   needs a token with the workflow permission; that only shows up on a real push.
+- **Push guard**: on a public GitHub repo, HQ can install a `pre-push` hook where git runs it — `.git/hooks`, or the
+  shared git dir for a linked worktree (a button, after you confirm what it does). It writes only that one file — if a hook
+  is already there that isn't HQ's (no `# hq-guard` marker), HQ refuses and leaves it in place, and it never overwrites
+  anything else. A repo that sets `core.hooksPath` to a tracked folder like `.husky` is left alone: writing HQ's hook
+  there would add a file to the repo itself, where it could get committed. From then on, every `git push` from
+  that repo is checked before it happens: a branch deletion and a force-push (a non-fast-forward) are blocked; a push that
+  adds or changes a file that looks like a secret is blocked — `sk-` / `ghp_` / `github_pat_` / `AKIA` / Slack `xox`
+  tokens or a `…PRIVATE KEY…` block in any file, a `password` / `secret` / `token` / `api_key` assignment in a config-shaped
+  file (`.ini`, `.conf`, `.yaml`, `.toml`, …), and any `.env` / `.env.*` file on its own; and a file the push would add or
+  enlarge past 50 MB is blocked. The hook scans only what the push adds: the files the push adds, changes or renames (a new branch: only the commits the remote doesn't have yet),
+  plus the lines every commit of the push adds — so a key committed and deleted again before the tip is still caught —
+  and an incremental push stays fast even on a big repo (the first push of a very large repo can take a while). A block
+  names only the commit, the file and the line number — never the secret's value, so a leak can't leak again.
+  Normal pushes and pulls are never affected. `git push --no-verify` skips the guard; that is the user's own choice to make
+  in their own terminal, and an agent must never use it.
 
 ## Optional extras
 | Key | What |

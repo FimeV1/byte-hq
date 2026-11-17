@@ -90,8 +90,16 @@ const notifier = config.push === false ? null : createNotifier({ configDir: path
 const readProjects = () => (fs.existsSync(PROJECTS_PATH) ? JSON.parse(fs.readFileSync(PROJECTS_PATH, "utf8")) : []);
 // "Work on a copy" (copies.mjs): worktree per chat, test there, apply only when tested.
 const copies = createCopies({ backends, projects: readProjects, credit: config.credit || {}, log: stamp });
-// Settings › Git: the git state of every project (git.mjs), read-only apart from the user's Refresh.
-const git = createGit({ backends, projects: readProjects, log: stamp });
+// Settings › Git: the git state of every project (git.mjs), read-only apart from the
+// user’s Refresh — and the push guard the user can install with one click.
+// The guard is the tracked hooks/pre-push.sh template; installGuard writes it into a
+// project’s .git/hooks and chmods it. Missing here (e.g. an older checkout) is fine:
+// installGuard then says the template isn’t available rather than writing a stub.
+const GUARD_TEMPLATE = (function () {
+  try { return fs.readFileSync(path.join(HERE, "hooks", "pre-push.sh"), "utf8"); }
+  catch { return null; }
+})();
+const git = createGit({ backends, projects: readProjects, guardTemplate: GUARD_TEMPLATE, log: stamp });
 const pushLink = (b, sid, dir) => `/?open=${encodeURIComponent(JSON.stringify({ backend: b.id, sid, dir }))}`;
 const auto = config.auto === false ? null : createAuto({
   config, backends, log: stamp,
@@ -600,6 +608,16 @@ async function handle(req, res) {
       return json(res, 200, await git.checkLogin(String(body.project)), { "Cache-Control": "no-store" });
     } catch (e) {
       stamp(`/hq/git/check-login failed: ${e.message}`);
+      return json(res, 400, { message: e.message });
+    }
+  }
+
+  if (p === "/hq/git/install-guard" && req.method === "POST") {
+    try {
+      const body = JSON.parse((await readBody(req, 16 << 10)).toString("utf8") || "{}");
+      return json(res, 200, await git.installGuard(String(body.project)), { "Cache-Control": "no-store" });
+    } catch (e) {
+      stamp(`/hq/git/install-guard failed: ${e.message}`);
       return json(res, 400, { message: e.message });
     }
   }

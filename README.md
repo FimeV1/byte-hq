@@ -30,7 +30,9 @@ Run one OpenCode server on each computer you want to work on, and HQ puts them a
   Private, when it's a GitHub one), commits ahead of or behind the last fetch, uncommitted files, and anything worth
   fixing in plain words. **Fetch** refreshes a project; **Connect to a repo** adds a remote (HQ shows the exact command
   first, validating it); **Check login** tests whether this machine can push, without pushing anything. Opening the section
-  never fetches, and HQ never pushes from here.
+  never fetches, and HQ never pushes from here. On a public GitHub repo you can install a **push guard**: a `pre-push`
+   hook that refuses a force-push or branch deletion, a secret-looking file, and files over 50 MB — without ever touching
+   normal pushes and pulls, and never overwriting a hook that isn't HQ's.
 - **Built for the phone too.** Install it on your home screen and get a notification when a job finishes or needs you.
   Dark by default, with a light theme in Settings.
 - **Helpful when things go wrong.** HQ tests whether a model can really edit files before you rely on it, and explains

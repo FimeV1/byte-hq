@@ -70,7 +70,7 @@ export function validateRemoteUrl(u) {
   return null;
 }
 
-export function createGit({ backends, projects, log = console.log }) {
+export function createGit({ backends, projects, guardTemplate = null, log = console.log }) {
   const call = async (b, method, p, body) => {
     const auth = b.user ? { authorization: "Basic " + Buffer.from(`${b.user}:${b.password}`).toString("base64") } : {};
     const r = await fetch(b.url.replace(/\/$/, "") + "/api" + p, {
@@ -119,6 +119,19 @@ export function createGit({ backends, projects, log = console.log }) {
     return isWindows(dir)
       ? `$env:GIT_TERMINAL_PROMPT='0'; $env:GIT_SSH_COMMAND='${ssh}'; git `
       : `GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND='${ssh}' git `;
+  };
+
+  /** The fs API resolves a file's path INSIDE its location, and it does not walk up
+   *  out of it with "..". A relative path is fine when the location is the repo
+   *  itself (.git/hooks/pre-push); an absolute path outside it (a linked
+   *  worktree's shared git dir, a core.hooksPath) needs the file's own directory
+   *  as the location instead. */
+  const fsTarget = (dir, file) => {
+    if (file.startsWith("/") || /^[A-Za-z]:[\\/]/.test(file)) {
+      const i = Math.max(file.lastIndexOf("/"), file.lastIndexOf("\\"));
+      return { dir: file.slice(0, i), file: file.slice(i + 1) };
+    }
+    return { dir, file };
   };
 
   /** Read one file on that machine through OpenCode's fs API (no shell, so it works everywhere). */
@@ -183,17 +196,33 @@ export function createGit({ backends, projects, log = console.log }) {
       out.problems.push("not a git repository");
       return out;
     }
-    const hookFile = isWindows(dir) ? ".git\\hooks\\pre-push" : ".git/hooks/pre-push";
-    const [br, rem, ab, st, lc, hook] = await Promise.all([
+    // Where git actually runs a pre-push hook: .git/hooks/pre-push in an ordinary
+    // repo, the shared git dir's hooks when this project is a linked worktree, and
+    // core.hooksPath if set. The answer is absolute (--path-format=absolute, git
+    // >= 2.31; the relative default stays as the fallback for older git) so it
+    // also works when the project is a subfolder of the repo -- a relative
+    // answer would be "../.git/..." and the fs API refuses to walk up.
+    // fsTarget splits the path into the (location, file) pair the fs API wants;
+    // the shell calls take it as-is.
+    const hookFile = (await g("rev-parse --path-format=absolute --git-path hooks/pre-push")).output.trim()
+      || (isWindows(dir) ? ".git\\hooks\\pre-push" : ".git/hooks/pre-push");
+    const hf = fsTarget(dir, hookFile);
+    const [br, rem, ab, st, lc, hook, hookx] = await Promise.all([
       g("branch --show-current"),
       g("remote get-url origin"),
       g(`rev-list --left-right --count ${q("HEAD...@{u}")}`),
       g("status --porcelain"),
       g("log -1 --pretty=%ct"),
-      readRemoteFile(b, dir, hookFile),
+      readRemoteFile(b, hf.dir, hf.file),
+      // test -x is a plain shell command, not a git one, so it goes through run
+      // (which the git-prefixing g() above would mangle). On Windows the exec
+      // bit is meaningless: Git for Windows runs hooks regardless.
+      (isWindows(dir) ? { exit: 0 } : run(b, dir, "test -x " + q(hookFile), 20_000)),
     ]);
-    // The guard is HQ's own hook: it exists and carries the marker the installer writes.
-    out.hasGuard = typeof hook === "string" && hook.includes("# hq-guard");
+    // The guard is HQ's own hook: it exists, carries the marker the installer
+    // writes, and (on POSIX) is executable -- git silently ignores a
+    // non-executable hook, so that would not be a guard at all.
+    out.hasGuard = typeof hook === "string" && hook.includes("# hq-guard") && (isWindows(dir) || hookx.exit === 0);
     if (br.output.trim()) out.branch = br.output.trim();
     const remote = rem.output.trim();
     if (rem.exit === 0 && remote) {
@@ -322,5 +351,80 @@ export function createGit({ backends, projects, log = console.log }) {
     return { ok: false, why: (hit ? hit[1] : `the remote refused the check (${real.slice(0, 200)}).`) + " Nothing was pushed." };
   }
 
-  return { status, refresh, connectRemote, checkLogin };
+  /**
+   * Install the push guard on a public project that has none: write HQ's
+   * hooks/pre-push.sh into the repo's pre-push hook -- where git actually runs
+   * it: .git/hooks/pre-push, the shared git dir for a linked worktree, or
+   * core.hooksPath if set -- and make it executable. A pre-push hook the user
+   * already has there that isn't HQ's is never overwritten -- the same two
+   * checks the dialog showed (the repo is public, and no foreign hook sits
+   * there) are repeated here, on the server.
+   */
+  async function installGuard(projectId) {
+    const p = find(projectId);
+    const b = machine(p.backend);
+    const dir = p.directory;
+    if (!guardTemplate) throw new Error("the guard template isn't available on this installation of HQ");
+    const probe = await run(b, dir, envPrefix(dir) + "rev-parse --is-inside-work-tree", 20_000).catch((e) => ({ exit: 1, output: "", _err: e.message }));
+    if (probe._err || probe.exit === 124) throw new Error(`can't reach ${b.label || p.backend}`);
+    if (probe.output.trim() !== "true") throw new Error("not a git repository");
+    // Re-check what the dialog showed, on the server, on the same values.
+    const st = await status(projectId);
+    if (st.visibility !== "public") throw new Error("this isn't a public repo, so the guard isn't needed");
+    const q = quoter(dir);
+    // The same "where git runs the hook" answer status() uses (see there),
+    // absolute so it is also right when the project is a subfolder of the repo.
+    const [hookProbe, commonDirProbe, hooksPathProbe] = await Promise.all([
+      run(b, dir, envPrefix(dir) + "rev-parse --path-format=absolute --git-path hooks/pre-push", 20_000),
+      run(b, dir, envPrefix(dir) + "rev-parse --path-format=absolute --git-common-dir", 20_000),
+      run(b, dir, envPrefix(dir) + "config --get core.hooksPath", 20_000),
+    ]);
+    const hookFile = hookProbe.output.trim() || (isWindows(dir) ? ".git\\hooks\\pre-push" : ".git/hooks/pre-push");
+    // A core.hooksPath that points OUTSIDE the git dir is the user's own hooks
+    // location -- usually a tracked folder like .husky. Writing HQ's hook there
+    // would add a file to the repo itself, where it could get committed: refuse.
+    // (A hooksPath inside the git dir is fine: nothing new enters the repo.)
+    // The reference is the COMMON git dir: in a linked worktree --git-dir is
+    // the per-worktree .git/worktrees/<name>, but the hook still lives in the
+    // shared git dir's hooks folder.
+    const commonDir = commonDirProbe.output.trim();
+    if (commonDir && !hookFile.startsWith(commonDir + "/") && !hookFile.startsWith(commonDir + "\\"))
+      throw new Error(`this repo uses its own hooks folder (core.hooksPath = ${hooksPathProbe.output.trim() || hookFile.replace(/([/\\])pre-push$/, "")}); HQ won't add files to it`);
+    const hf = fsTarget(dir, hookFile);
+    const existing = await readRemoteFile(b, hf.dir, hf.file);
+    if (existing !== null && !existing.includes("# hq-guard"))
+      throw new Error("a pre-push hook is already installed and it isn't HQ's, so HQ left it in place");
+    // Write the guard, then make it executable on POSIX (Mac / Linux). Git for
+    // Windows runs hooks regardless of the file mode, so it needs no chmod.
+    await writeRemoteFile(b, hf.dir, hf.file, guardTemplate);
+    if (!isWindows(dir)) {
+      const r = await run(b, dir, "chmod +x " + q(hookFile), 20_000);
+      if (r.exit !== 0) {
+        // A hook without the exec bit is dead weight, and its marker would make the
+        // dialog claim protection git silently ignores: remove what was just written
+        // (best effort), then report.
+        await run(b, dir, "rm -f " + q(hookFile), 20_000).catch(() => {});
+        const last = r.output.trim().split(/\r?\n/).pop() || `exit ${r.exit}`;
+        throw new Error(`the guard could not be made executable, so HQ removed it again: ${last.slice(0, 200)}`);
+      }
+    }
+    return status(projectId);
+  }
+
+  /** A file-write through OpenCode's experimental fs/write endpoint. */
+  async function writeRemoteFile(b, dir, file, content) {
+    const u = b.url.replace(/\/$/, "") + `/api/experimental/fs/write?path=${encodeURIComponent(file)}&${loc(dir)}`;
+    const r = await fetch(u, {
+      method: "POST",
+      headers: b.user
+          ? { "content-type": "application/octet-stream", authorization: "Basic " + Buffer.from(`${b.user}:${b.password}`).toString("base64") }
+          : { "content-type": "application/octet-stream" },
+      body: content,
+      signal: AbortSignal.timeout(30_000),
+    });
+    const t = await r.text();
+    if (!r.ok) throw new Error(`writing ${file} failed (${r.status}): ${t.slice(0, 200)}`);
+    return t;
+  }
+  return { status, refresh, connectRemote, checkLogin, installGuard };
 }

@@ -11,6 +11,15 @@
   saved, an untrusted host key, a missing permission, or a branch that just needs a pull. A GitHub
   remote's "Public/Private" badge now reads **Private or not found** when an unauthenticated call 404s. Read-only apart from
   the fetch and the connect: HQ never pushes from here.
+- **Push guard for public repos.** On a public GitHub repo, one click (after confirming what it does) installs a
+  `pre-push` hook where git runs it — `.git/hooks` (or the shared git dir for a linked worktree). A repo that sets
+  `core.hooksPath` to a tracked folder like `.husky` is left alone: writing HQ's hook there would add a file to the repo.
+   From then on a push is checked before it happens: a branch deletion or a
+  force-push is refused, a file that looks like a secret is refused (`sk-`/`ghp_`/`github_pat_`/`AKIA`/Slack tokens, a
+  private-key block, a `password`/`secret`/`token` value in a config file, any `.env`), and a file over 50 MB is refused.
+  It scans only what the push adds: the files it adds, changes or renames, plus the lines every commit of the push adds (so a key committed and deleted again before the tip is still caught), and a block names the commit, file and line — never the secret itself. A hook
+  that isn't HQ's is never overwritten; normal pushes and pulls are never affected, and `git push --no-verify` skips the
+  guard when you decide to.
 - Reviews of a copy chat cover the whole copy (what Apply commits), not just the last turn, and the newest review names
   the commit.
 - Picking a smaller model for a big chat compacts it first, with the current model, so the next step fits.

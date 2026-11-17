@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowUp, ChevronRight, CircleCheck, Copy, Folder, FolderOpen, KeyRound, Link, LoaderCircle, Monitor, Pencil, Plus, RefreshCw, SquarePen } from "lucide-react";
+import { ArrowUp, ChevronRight, CircleCheck, Copy, Folder, FolderOpen, KeyRound, Link, LoaderCircle, Monitor, Pencil, Plus, RefreshCw, Shield, SquarePen } from "lucide-react";
 import { api, hq } from "./api";
 import { chatsSpace, createProject, newChat, openMachine, openModal, openModels, projectSpace, toast, useStore } from "./store";
 import type { Backend, GitCheckLogin, GitStatus, Machine, Project, Space } from "./types";
@@ -351,6 +351,22 @@ export function GitDialog() {
       .catch((e) => toast(e instanceof Error ? e.message : String(e)))
       .finally(() => setBusy((b) => ({ ...b, [p.id]: false })));
   };
+
+  // Install the push guard on a public repo that has none. The server re-checks that
+  // it is public and that no foreign hook sits there, then writes it and makes it
+  // executable on POSIX.
+  const installGuard = (p: Project) => {
+    if (!confirm(
+      `Install a push guard on ${p.name}?\n\n` +
+      `HQ writes a pre-push hook where git runs it -- this repo's .git/hooks by default -- on the machine it lives on. From then on, anything pushed to this public repo is checked first: a force-push or a branch deletion is refused, a file that looks like a secret or a .env is refused, and a file over 50 MB is refused. Normal pushes and pulls are never affected.\n\n` +
+      `If you already have a hook you want to keep, HQ leaves it in place and won't overwrite it. You can always skip this guard with git push --no-verify.`
+    )) return;
+    setBusy((b) => ({ ...b, [p.id]: true }));
+    hq.gitInstallGuard(p.id)
+      .then((s) => setRows((r) => ({ ...r, [p.id]: s })))
+      .catch((e) => toast(e instanceof Error ? e.message : String(e)))
+      .finally(() => setBusy((b) => ({ ...b, [p.id]: false })));
+  };
   // All hooks above: replacing the list with the connect dialog must not change the hook count.
   if (connectTo)
     return (
@@ -435,6 +451,11 @@ export function GitDialog() {
                         <button type="button" className="icon-btn" disabled={!!busy[p.id]} onClick={() => refresh(p)} title="Fetch the remote" aria-label={`Fetch ${p.name}`}>
                           {busy[p.id] ? <LoaderCircle size={15} className="spin" /> : <RefreshCw size={14} />}
                         </button>
+                        {r.visibility === "public" && !r.hasGuard && (
+                          <button type="button" className="icon-btn" disabled={!!busy[p.id]} onClick={() => installGuard(p)} title="Install a pre-push hook that blocks force-pushes, branch deletions, secrets and huge files (you can skip it with --no-verify)" aria-label={`Install push guard for ${p.name}`}>
+                            {busy[p.id] ? <LoaderCircle size={15} className="spin" /> : <Shield size={14} />}
+                        </button>
+                        )}
                       </div>
                     )}
                   </div>
@@ -447,6 +468,7 @@ export function GitDialog() {
       <div className="notice" style={{ marginTop: 12 }}>
         HQ reads the state, runs <code>git fetch</code> when you ask, and can connect a project to a repo after you see the command.
         <b> Check login</b> is a dry-run push: it tests the machine's login and pushes nothing. Pushing happens in agents and terminals, which know their own rules.
+        <b>Push guard</b> is a pre-push hook you can install on a public repo. It blocks force-pushes and branch deletions, and refuses a file that looks like a secret or is over 50 MB. A normal push and pull are never affected; you can skip it with git push --no-verify.
       </div>
     </Dialog>
   );
