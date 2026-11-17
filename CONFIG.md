@@ -123,6 +123,14 @@ is public or private (an unauthenticated GitHub API call, cached for ten minutes
 the **last fetch**, the uncommitted files, the last commit, and the problems in plain words. A **Fetch** button per
 project runs `git fetch --prune` (30-second timeout); opening the section never fetches, and nothing here ever pushes.
 A machine that isn't answering shows *can't reach \<machine\>* for its own rows and blocks nothing else.
+- **Connect to a repo**: paste a remote URL (only `https://`, `ssh://` and scp `user@host:path` forms are accepted).
+  It is validated for shell metacharacters (spaces, quotes, `;` `|` `&` `<` `>` `$`, backticks, newlines, backslashes),
+  shown to you as the exact `git remote add origin <url>` it will run, and runs that one command — it never overwrites an
+  existing `origin`.
+- **Check login**: runs `git push --dry-run --no-verify origin HEAD` (it transfers nothing and runs no local hooks, and a
+  60-second timeout is a failed check, never a hang) and explains the result in plain words — no login saved, the host key
+  isn't trusted, no push permission, a workflow sign-off is missing, or the branch is behind (a non-fast-forward still means
+  the login works; the branch just needs a pull or rebase).
 
 ## Optional extras
 | Key | What |

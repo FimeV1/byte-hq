@@ -142,10 +142,14 @@ export type GitStatus = {
   id: string; name: string; backend: string;
   isGit: boolean; branch: string | null; remote: string | null;
   owner: string | null; repo: string | null;
-  visibility: "public" | "private" | "unknown";
+  /** private-or-missing: GitHub's 404, which a no-token call can't tell apart from a private repo. */
+  visibility: "public" | "private" | "private-or-missing" | "unknown";
   ahead: number; behind: number; uncommitted: number;
   lastCommitAt: number | null; hasGuard: boolean; problems: string[];
 };
+
+/** "Check login" (POST /hq/git/check-login): a dry-run push that moves nothing. */
+export type GitCheckLogin = { ok: boolean; why: string };
 
 export type CopyInfo = {
   base: string; worktree: string; projectID: string; applied?: string; discarded?: boolean;

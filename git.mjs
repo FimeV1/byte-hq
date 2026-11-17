@@ -45,6 +45,30 @@ export function githubParts(remote) {
   return { owner: segs[0], repo: segs[1].replace(/\.git$/i, "") };
 }
 
+// A remote URL is user input that will end up inside a shell command on someone else's machine,
+// so it is allowed only in the exact forms git itself accepts, nothing else:
+//   https://host/path        (the everyday form; no login in it, no http://)
+//   ssh://host/path, ssh://user@host/path
+//   user@host:path           (the scp-like form, e.g. git@github.com:owner/repo)
+// No spaces, quotes, ; | $ ` & < > \ or newlines, ever: the allowlist below already makes them
+// impossible, and the first check keeps the error message about them explicit.
+export function validateRemoteUrl(u) {
+  const s = String(u || "").trim();
+  if (!s) return "paste a URL first";
+  if (/[\s"'`;|&<>\r\n]/.test(s) || s.includes("\\"))
+    return `a URL can't contain ${[...new Set([...s].filter((c) => /[\s"'`;|&<>\r\n\\]/.test(c)))].map((c) => ({ " ": "a space", '"': "a quote", "'": "a quote", "\n": "a line break" }[c] || `“${c}”`)).join(", ")}`;
+  const host = "[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*";
+  const path = "[A-Za-z0-9._~%/-]+";
+  const forms = [
+    new RegExp(`^https://${host}(?::\\d{1,5})?/${path}$`, "i"),
+    new RegExp(`^ssh://(?:[a-z0-9._-]+@)?${host}(?::\\d{1,5})?/${path}$`, "i"),
+    new RegExp(`^[a-z0-9._-]+@${host}:${path}$`, "i"),
+  ];
+  if (!forms.some((re) => re.test(s)))
+    return "not a repo URL: use https://host/path, ssh://host/path, or user@host:path";
+  return null;
+}
+
 export function createGit({ backends, projects, log = console.log }) {
   const call = async (b, method, p, body) => {
     const auth = b.user ? { authorization: "Basic " + Buffer.from(`${b.user}:${b.password}`).toString("base64") } : {};
@@ -106,20 +130,21 @@ export function createGit({ backends, projects, log = console.log }) {
     return (await r.text()).slice(0, 64_000);
   }
 
-  /** public / private / unknown, from the GitHub API with no token: 200 = public, 404 = private or
-   *  missing, anything else (rate limit, network) = unknown. Cached briefly, so a list of many
-   *  projects doesn't burn the unauthenticated rate limit. */
+  /** public / private / unknown, from the GitHub API with no token: 200 = public, 404 = private OR
+   *  the repo doesn't exist (a typo in the remote also 404s — GitHub never says which), anything
+   *  else (rate limit, network) = unknown. Cached briefly, so a list of many projects doesn't burn
+   *  the unauthenticated rate limit. */
   async function visibility(owner, repo) {
     const key = owner + "/" + repo;
     const hit = visCache.get(key);
     if (hit && Date.now() - hit.at < VIS_TTL) return hit.visibility;
     let visibility = "unknown";
     try {
-      const r = await fetch(`https://${GITHUB_API}/repos/${owner}/${repo}`, {
+      const r = await fetch(`https://${GITHUB_API}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`, {
         headers: { accept: "application/vnd.github+json" },
         signal: AbortSignal.timeout(10_000),
       });
-      visibility = r.status === 200 ? "public" : r.status === 404 ? "private" : "unknown";
+      visibility = r.status === 200 ? "public" : r.status === 404 ? "private-or-missing" : "unknown";
     } catch {
       visibility = "unknown";
     }
@@ -214,5 +239,85 @@ export function createGit({ backends, projects, log = console.log }) {
     return status(projectId);
   }
 
-  return { status, refresh };
+  /**
+   * Connect a repo that has no remote: `git remote add origin <url>`. The URL was already checked
+   * by the dialog (and is shown to the user there before they confirm), and is checked AGAIN here,
+   * on the server, before anything runs. `git remote add` only writes config — it contacts nothing —
+   * but the quoting rule still applies.
+   */
+  async function connectRemote(projectId, url) {
+    const p = find(projectId);
+    const b = machine(p.backend);
+    const dir = p.directory;
+    const bad = validateRemoteUrl(url);
+    if (bad) throw new Error(bad);
+    const q = quoter(dir);
+    const probe = await run(b, dir, envPrefix(dir) + "rev-parse --is-inside-work-tree", 20_000).catch((e) => ({ exit: 1, output: "", _err: e.message }));
+    if (probe._err || probe.exit === 124) throw new Error(`can't reach ${b.label || p.backend}`);
+    if (probe.output.trim() !== "true") throw new Error("not a git repository");
+    const cur = await run(b, dir, envPrefix(dir) + "remote get-url origin", 20_000);
+    if (cur.exit === 0 && cur.output.trim()) throw new Error("this project already has a remote named origin");
+    const r = await run(b, dir, envPrefix(dir) + `remote add origin ${q(url.trim())}`, 30_000);
+    if (r.exit !== 0) {
+      const last = r.output.trim().split(/\r?\n/).pop() || `exit ${r.exit}`;
+      throw new Error(`could not connect: ${last.slice(0, 300)}`);
+    }
+    return status(projectId);
+  }
+
+  // What a failed `git push --dry-run` usually means, in words the user can act on. Order matters:
+  // the first match wins, and the login checks come before the permission ones (a missing login
+  // fails before git ever asks the remote).
+  const LOGIN_WHY = [
+    [/could not read Username|terminal prompts disabled|Authentication failed/i,
+      "no login saved on this machine for that remote — git would ask for a password, and HQ refuses to wait for one. Save a login there (a credential helper, a token in the URL, or an SSH key) and check again."],
+    [/Host key verification failed/i,
+      "this machine's ssh has never been offered that host's key, so it can't be trusted yet. Open a terminal on that machine and run ssh to the host once (or add its key to known_hosts), then check again."],
+    [/Permission denied \(publickey\)/i,
+      "this machine's SSH key isn't accepted by that remote. Add the machine's public key to the account that pushes there."],
+    [/(?:status 403|not authorized|insufficient [a-z ]*access|repository is not allowed|permission to push)/i,
+      "this login can reach the remote but isn't allowed to push to that repo. Give the account push access to it."],
+    [/(?:workflow sign-off|requires workflow)/i,
+      "that repo requires workflow sign-off, and this login doesn't have it. Ask whoever administers the repo to grant it."],
+  ];
+
+  /**
+   * "Check login": can this machine push to this project's origin? A real push with --dry-run,
+   * which transfers nothing (and --no-verify, so no local hooks run) — but it answers the only
+   * question that matters: does the login on this box work for that remote. envPrefix means it
+   * can never wait for a password; a timeout is a failed check, not a hang.
+   */
+  async function checkLogin(projectId) {
+    const p = find(projectId);
+    const b = machine(p.backend);
+    const dir = p.directory;
+    const probe = await run(b, dir, envPrefix(dir) + "rev-parse --is-inside-work-tree", 20_000).catch((e) => ({ exit: 1, output: "", _err: e.message }));
+    if (probe._err || probe.exit === 124) throw new Error(`can't reach ${b.label || p.backend}`);
+    if (probe.output.trim() !== "true") throw new Error("not a git repository");
+    const rem = await run(b, dir, envPrefix(dir) + "remote get-url origin", 20_000);
+    const remote = rem.output.trim();
+    if (rem.exit !== 0 || !remote)
+      return { ok: false, why: "no remote named origin on this project yet — connect one first." };
+    const r = await run(b, dir, envPrefix(dir) + "push --dry-run --no-verify origin HEAD", 60_000);
+    if (r.exit === 0) {
+      return { ok: true, why: "login works on this machine for that remote. Nothing was pushed." };
+    }
+    if (r.exit === 124) {
+      return { ok: false, why: `timed out after 60 s — nothing moved, and nothing was pushed. The remote or the connection is very slow.` };
+    }
+    const out = r.output.trim();
+    // A rejected non-fast-forward means the login WORKED (git got far enough to compare branches);
+    // the branch just needs a pull or rebase. Not a login problem.
+    if (/non-fast-forward/i.test(out)) {
+      return { ok: true, why: "login works — but this branch is behind, or has diverged from, the remote, so a real push would be rejected until you pull or rebase. Nothing was pushed." };
+    }
+    const hit = LOGIN_WHY.find(([re]) => re.test(out));
+    // For the unclassified case, show the first line that looks like the actual error, not git's
+    // trailing boilerplate ("and the repository exists.").
+    const lines = out.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const real = lines.find((l) => /fatal:|error:|denied|refused|failed|host key/i.test(l)) || lines[0] || `exit ${r.exit}`;
+    return { ok: false, why: (hit ? hit[1] : `the remote refused the check (${real.slice(0, 200)}).`) + " Nothing was pushed." };
+  }
+
+  return { status, refresh, connectRemote, checkLogin };
 }

@@ -10,7 +10,7 @@
 //   /hq/config          -> app name + the backend list (no secrets)
 //   /hq/projects        -> GET / PUT the project list (a JSON file next to the config)
 //   /hq/machines        -> the machine list; /hq/machines/{test,save,remove} change it (machines.mjs)
-//   /hq/git/{status,refresh} -> Settings › Git: each project's git state (git.mjs)
+//   /hq/git/{status,refresh,connect,check-login} -> Settings › Git: state, fetch, connect a remote, check the login (git.mjs)
 //   /hq/models/*        -> Settings › Models and the model Test (models.mjs)
 //   /hq/media/*         -> images and videos made with the Byte API: /make, and the saved files (models.mjs)
 //   everything else     -> the built UI in dist/ (index.html for unknown paths)
@@ -582,6 +582,24 @@ async function handle(req, res) {
       return json(res, 200, await git.refresh(String(body.project)), { "Cache-Control": "no-store" });
     } catch (e) {
       stamp(`/hq/git/refresh failed: ${e.message}`);
+      return json(res, 400, { message: e.message });
+    }
+  }
+  if (p === "/hq/git/connect" && req.method === "POST") {
+    try {
+      const body = JSON.parse((await readBody(req, 16 << 10)).toString("utf8") || "{}");
+      return json(res, 200, await git.connectRemote(String(body.project), String(body.url || "")), { "Cache-Control": "no-store" });
+    } catch (e) {
+      stamp(`/hq/git/connect failed: ${e.message}`);
+      return json(res, 400, { message: e.message });
+    }
+  }
+  if (p === "/hq/git/check-login" && req.method === "POST") {
+    try {
+      const body = JSON.parse((await readBody(req, 16 << 10)).toString("utf8") || "{}");
+      return json(res, 200, await git.checkLogin(String(body.project)), { "Cache-Control": "no-store" });
+    } catch (e) {
+      stamp(`/hq/git/check-login failed: ${e.message}`);
       return json(res, 400, { message: e.message });
     }
   }

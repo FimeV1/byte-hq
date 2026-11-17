@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { ArrowUp, ChevronRight, CircleCheck, Copy, Folder, FolderOpen, LoaderCircle, Monitor, Pencil, Plus, RefreshCw, SquarePen } from "lucide-react";
+import { ArrowUp, ChevronRight, CircleCheck, Copy, Folder, FolderOpen, KeyRound, Link, LoaderCircle, Monitor, Pencil, Plus, RefreshCw, SquarePen } from "lucide-react";
 import { api, hq } from "./api";
 import { chatsSpace, createProject, newChat, openMachine, openModal, openModels, projectSpace, toast, useStore } from "./store";
-import type { Backend, GitStatus, Machine, Project, Space } from "./types";
+import type { Backend, GitCheckLogin, GitStatus, Machine, Project, Space } from "./types";
 import { applyTheme, Dialog, savedTheme, type Theme } from "./ui";
 import { formatBytes } from "./Gallery";
 
@@ -228,6 +228,96 @@ const fmtWhen = (ms: number | null) => {
   return new Date(ms).toLocaleDateString();
 };
 
+/** Connect a project to a repo: the URL is checked here (and again on the server) before the
+ *  user confirms, and the user sees the exact command that will run before they run it. */
+function GitConnectDialog({ project, onDone, onCancel }: { project: Project; onDone: (s: GitStatus) => void; onCancel: () => void }) {
+  const backends = useStore((s) => s.backends);
+  const backend = backends.find((b) => b.id === project.backend);
+  const [url, setUrl] = useState("");
+  const [err, setErr] = useState("");
+  const [phase, setPhase] = useState<"input" | "confirm">("input");
+  const [busy, setBusy] = useState(false);
+  const bad = hqValidateUrl(url);
+  const command = `git remote add origin ${url.trim()}`;
+  const connect = () => {
+    if (bad) return setErr(bad);
+    setBusy(true);
+    hq.gitConnect(project.id, url.trim())
+      .then((s) => {
+        toast(`Connected ${project.name} to that repo`);
+        onDone(s);
+      })
+      .catch((e) => setErr(e instanceof Error ? e.message : String(e)))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <Dialog
+      title={`Connect ${project.name} to a repo`}
+      onClose={() => !busy && onCancel()}
+      footer={
+        phase === "input" ? (
+          <>
+            <button type="button" className="btn big" disabled={busy} onClick={onCancel}>Cancel</button>
+            <button type="button" className="btn big primary" disabled={!!bad || busy} onClick={() => setPhase("confirm")}>Continue</button>
+          </>
+        ) : phase === "confirm" ? (
+          <>
+            <button type="button" className="btn big" disabled={busy} onClick={() => setPhase("input")}>Back</button>
+            <button type="button" className="btn big primary" disabled={busy} onClick={connect}>
+              {busy ? "Connecting…" : "Connect"}
+            </button>
+          </>
+        ) : undefined
+      }
+    >
+      {phase === "confirm" ? (
+        <>
+          <small>Before it runs, here is exactly what HQ will do on {backend?.label || project.backend}:</small>
+          <code className="git-command">{command}</code>
+          <small>
+            That only writes the remote into the project's git config — it contacts nothing, and nothing is pushed.
+            After it, use <b>Check login</b> to see whether {backend?.label || "this machine"} can push to it.
+          </small>
+        </>
+      ) : (
+        <>
+          <small>Paste the repo's address, from its "Clone" menu. HTTPS and SSH addresses both work.</small>
+          <input
+            className="input"
+            autoFocus
+            spellCheck={false}
+            autoCapitalize="off"
+            placeholder="https://github.com/you/your-repo.git"
+            value={url}
+            onChange={(e) => {
+              setUrl(e.target.value);
+              setErr("");
+            }}
+            onKeyDown={(e) => !bad && e.key === "Enter" && setPhase("confirm")}
+          />
+          {url.trim() && bad && <div className="git-problem">{bad}</div>}
+          {err && <div className="git-problem">{err}</div>}
+        </>
+      )}
+    </Dialog>
+  );
+}
+
+// The client-side half of the check: good enough to disable the button and show a reason before
+// the user confirms. The server re-runs its own check on the same URL before anything runs.
+const URL_FORMS = [
+  /^https:\/\/[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*(?::\d{1,5})?\/[A-Za-z0-9._~%/-]+$/i,
+  /^ssh:\/\/(?:[a-z0-9._-]+@)?[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*(?::\d{1,5})?\/[A-Za-z0-9._~%/-]+$/i,
+  /^[a-z0-9._-]+@[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*:[A-Za-z0-9._~%/-]+$/i,
+];
+function hqValidateUrl(u: string): string {
+  const s = u.trim();
+  if (!s) return "paste a URL first";
+  if (/[\s"'`;|&<>\r\n\\]/.test(s)) return "that URL contains characters a repo address can't have (a space, quote, ; | & < > or similar)";
+  if (!URL_FORMS.some((re) => re.test(s))) return "not a repo URL: use https://host/path, ssh://host/path, or user@host:path";
+  return "";
+}
+
 /** Settings › Git: every project's repo, branch and sync state, grouped by machine.
  *  HQ only reads state and (on request) fetches; pushing belongs to agents and terminals. */
 export function GitDialog() {
@@ -236,6 +326,16 @@ export function GitDialog() {
   const [rows, setRows] = useState<Record<string, GitRow | undefined>>({});
   const [needsOnly, setNeedsOnly] = useState(false);
   const [busy, setBusy] = useState<Record<string, boolean>>({});
+  const [connectTo, setConnectTo] = useState<Project | null>(null);
+  const [login, setLogin] = useState<Record<string, GitCheckLogin | undefined>>({});
+  const checkLogin = (p: Project) => {
+    setBusy((b) => ({ ...b, [p.id]: true }));
+    setLogin((l) => ({ ...l, [p.id]: undefined }));
+    hq.gitCheckLogin(p.id)
+      .then((r) => setLogin((l) => ({ ...l, [p.id]: r })))
+      .catch((e) => setLogin((l) => ({ ...l, [p.id]: { ok: false, why: e instanceof Error ? e.message : String(e) } })))
+      .finally(() => setBusy((b) => ({ ...b, [p.id]: false })));
+  };
   // Load every row at once; a slow or offline machine only delays its own rows.
   useEffect(() => {
     projects.forEach((p) =>
@@ -251,6 +351,18 @@ export function GitDialog() {
       .catch((e) => toast(e instanceof Error ? e.message : String(e)))
       .finally(() => setBusy((b) => ({ ...b, [p.id]: false })));
   };
+  // All hooks above: replacing the list with the connect dialog must not change the hook count.
+  if (connectTo)
+    return (
+      <GitConnectDialog
+        project={connectTo}
+        onDone={(s) => {
+          setConnectTo(null);
+          setRows((r) => ({ ...r, [s.id]: s }));
+        }}
+        onCancel={() => setConnectTo(null)}
+      />
+    );
   const shown = needsOnly ? projects.filter((p) => rowHasProblems(rows[p.id])) : projects;
   return (
     <Dialog title="Git" onClose={() => openModal(null)}>
@@ -274,12 +386,15 @@ export function GitDialog() {
               {mine.map((p) => {
                 const r = rows[p.id];
                 const err = r && "error" in r;
+                const lg = login[p.id];
                 return (
                   <div className="rowline git-row" key={p.id}>
                     <div className="grow">
                       <span className="git-name">{p.name}</span>
                       {r && !err && r.visibility !== "unknown" && (
-                        <span className={"badge " + (r.visibility === "public" ? "pub" : "priv")}>{r.visibility === "public" ? "Public" : "Private"}</span>
+                        <span className={"badge " + (r.visibility === "public" ? "pub" : "priv")}>
+                          {r.visibility === "public" ? "Public" : r.visibility === "private" ? "Private" : "Private or not found"}
+                        </span>
                       )}
                       {r && !err && r.isGit && r.branch && <span className="git-branch">{r.branch}</span>}
                       <small>
@@ -298,11 +413,29 @@ export function GitDialog() {
                       {r && !err && r.problems.map((t) => (
                         <div className="git-problem" key={t}>{t}</div>
                       ))}
+                      {lg && (
+                        <div className={lg.ok ? "git-ok" : "git-problem"}>
+                          {lg.ok ? <CircleCheck size={12} className="git-ok-icon" /> : null}
+                          {lg.why}
+                        </div>
+                      )}
                     </div>
                     {r && !err && r.isGit && (
-                      <button type="button" className="icon-btn" disabled={!!busy[p.id]} onClick={() => refresh(p)} title="Fetch the remote" aria-label={`Fetch ${p.name}`}>
-                        {busy[p.id] ? <LoaderCircle size={15} className="spin" /> : <RefreshCw size={14} />}
-                      </button>
+                      <div className="git-actions">
+                        {!r.remote && (
+                          <button type="button" className="icon-btn" disabled={!!busy[p.id]} onClick={() => setConnectTo(p)} title="Connect this project to a repo" aria-label={`Connect ${p.name}`}>
+                            <Link size={14} />
+                          </button>
+                        )}
+                        {r.remote && (
+                          <button type="button" className="icon-btn" disabled={!!busy[p.id]} onClick={() => checkLogin(p)} title="Check this machine's login can push (nothing is pushed)" aria-label={`Check login for ${p.name}`}>
+                            {busy[p.id] ? <LoaderCircle size={15} className="spin" /> : <KeyRound size={14} />}
+                          </button>
+                        )}
+                        <button type="button" className="icon-btn" disabled={!!busy[p.id]} onClick={() => refresh(p)} title="Fetch the remote" aria-label={`Fetch ${p.name}`}>
+                          {busy[p.id] ? <LoaderCircle size={15} className="spin" /> : <RefreshCw size={14} />}
+                        </button>
+                      </div>
                     )}
                   </div>
                 );
@@ -312,7 +445,8 @@ export function GitDialog() {
         );
       })}
       <div className="notice" style={{ marginTop: 12 }}>
-        HQ only reads the state, and runs <code>git fetch</code> when you ask. Pushing happens in agents and terminals, which know their own rules.
+        HQ reads the state, runs <code>git fetch</code> when you ask, and can connect a project to a repo after you see the command.
+        <b> Check login</b> is a dry-run push: it tests the machine's login and pushes nothing. Pushing happens in agents and terminals, which know their own rules.
       </div>
     </Dialog>
   );

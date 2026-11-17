@@ -1,4 +1,4 @@
-import type { Backend, ByteKeyInfo, Media, MediaItem, FileDiff, Form, GitStatus, InboxItem, Machine, ModelCheck, ModelChecks, TestResult, Model, ModelRef, Msg, PermissionRequest, PermissionRule, Project, Session } from "./types";
+import type { Backend, ByteKeyInfo, Media, MediaItem, FileDiff, Form, GitCheckLogin, GitStatus, InboxItem, Machine, ModelCheck, ModelChecks, TestResult, Model, ModelRef, Msg, PermissionRequest, PermissionRule, Project, Session } from "./types";
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -62,6 +62,8 @@ export const hq = {
   mediaDelete: (file: string) => call("/hq/media/delete", { method: "POST", body: JSON.stringify({ file }) }),
   gitStatus: (project: string) => call<GitStatus>(`/hq/git/status?project=${encodeURIComponent(project)}`, { cache: "no-store" } as RequestInit),
   gitRefresh: (project: string) => call<GitStatus>("/hq/git/refresh", { method: "POST", body: JSON.stringify({ project }) }),
+  gitConnect: (project: string, url: string) => call<GitStatus>("/hq/git/connect", { method: "POST", body: JSON.stringify({ project, url }) }),
+  gitCheckLogin: (project: string) => call<GitCheckLogin>("/hq/git/check-login", { method: "POST", body: JSON.stringify({ project }) }),
   machines: () => call<Machine[]>("/hq/machines"),
   machineTest: (m: Partial<Machine> & { password?: string }) =>
     call<{ hostname: string; version: string; suggestHome: string }>("/hq/machines/test", { method: "POST", body: JSON.stringify(m) }),

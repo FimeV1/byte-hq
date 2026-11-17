@@ -4,8 +4,13 @@
 - Settings › Git: every project's git state at a glance — whether the folder is a repository, its branch, its remote
   (Public/Private for GitHub remotes), commits ahead of and behind the last fetch, uncommitted files, and the problems
   in plain words ("no remote", "out of sync: 1 to push, 0 to pull", …). A "Needs attention" filter, a per-project
-  **Fetch** button, and machines that aren't answering shown as such. Read-only apart from the fetch: HQ never pushes
-  from here.
+  **Fetch** button, a per-project
+  **Connect to a repo** and **Check login**, and machines that aren't answering shown as such. **Connect** pastes a URL (https,
+  ssh or scp form), which HQ validates and shows as the exact `git remote add origin …` it will run before running it;
+  **Check login** runs a `git push --dry-run` (it pushes nothing) and explains in plain words what a failure means — no login
+  saved, an untrusted host key, a missing permission, a workflow sign-off, or a branch that just needs a pull. A GitHub
+  remote's "Public/Private" badge now reads **Private or not found** when an unauthenticated call 404s. Read-only apart from
+  the fetch and the connect: HQ never pushes from here.
 
 ## 0.1.0 (first public release)
 - Chat with models on one or more OpenCode servers, from desktop or phone (installable, with notifications).

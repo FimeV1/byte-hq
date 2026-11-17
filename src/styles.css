@@ -465,6 +465,10 @@ button.sb-label:hover { color: var(--text-2); }
 .git-row .badge { margin-left: 6px; vertical-align: 1px; }
 .git-branch { margin-left: 6px; font: 12px var(--mono); color: var(--text-2); background: var(--raised); border: 1px solid var(--border-soft); border-radius: var(--r-sm); padding: 0 6px; vertical-align: 1px; }
 .git-problem { color: var(--warn); font-size: 12.5px; line-height: 17px; }
+.git-ok { color: var(--add); font-size: 12.5px; line-height: 17px; }
+.git-ok-icon { vertical-align: -2px; margin-right: 4px; }
+.git-actions { display: flex; gap: 2px; flex: none; }
+.git-command { display: block; font: 12.5px var(--mono); color: var(--text-2); background: var(--raised); border: 1px solid var(--border-soft); border-radius: var(--r-sm); padding: 7px 9px; overflow-wrap: anywhere; margin: 8px 0; }
 
 /* ---------- right panel, toast ---------- */
 .panel { width: 46%; min-width: 380px; max-width: 760px; flex: none; border-left: 1px solid var(--border); background: var(--bg); display: flex; flex-direction: column; min-height: 0; }

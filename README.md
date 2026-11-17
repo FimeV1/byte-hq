@@ -28,7 +28,9 @@ Run one OpenCode server on each computer you want to work on, and HQ puts them a
   Add more in **Settings › Servers**.
 - **The state of every repo, at a glance.** **Settings › Git** lists each project's branch, its remote (Public or
   Private, when it's a GitHub one), commits ahead of or behind the last fetch, uncommitted files, and anything worth
-  fixing in plain words. **Fetch** refreshes a project; opening the section never does, and HQ never pushes from here.
+  fixing in plain words. **Fetch** refreshes a project; **Connect to a repo** adds a remote (HQ shows the exact command
+  first, validating it); **Check login** tests whether this machine can push, without pushing anything. Opening the section
+  never fetches, and HQ never pushes from here.
 - **Built for the phone too.** Install it on your home screen and get a notification when a job finishes or needs you.
   Dark by default, with a light theme in Settings.
 - **Helpful when things go wrong.** HQ tests whether a model can really edit files before you rely on it, and explains
