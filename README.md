@@ -151,5 +151,10 @@ open http://127.0.0.1:4112. Write the mock model's behaviours into `dev/mock_mod
 `npm run check` runs the type check, syntax checks and build. [AGENTS.md](AGENTS.md) maps the code (written for AI
 coding agents, useful for people too).
 
+## Credits
+HQ is made by [FimeV1](https://github.com/FimeV1). Since 0.2.0 it is also partly built by
+[Byte](https://bytedev.co.uk), FimeV1's own AI running on local models, working inside HQ itself: Byte writes
+changes on a copy, another Byte model reviews them, and FimeV1 applies them. Those commits name Byte as a co-author.
+
 ## License
 [MIT](LICENSE). HQ talks to OpenCode over its HTTP API and includes none of its code.
