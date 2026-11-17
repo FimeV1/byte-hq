@@ -264,7 +264,7 @@ export function createAuto({ config, backends, log = console.log, notify = null,
   }
 
   /** Review one turn's changes in a read-only child chat, with the same model choice as the work. */
-  async function reviewTurn(b, ses, turnId, request, files) {
+  async function reviewTurn(b, ses, turnId, request, files, whole = false) {
     const pick = await pickModel(b);
     if (!pick) return log(`auto ${ses.id}: no reviewer available`), null;
     const saved = pick.role === "primary" ? await slot("save") : false;
@@ -288,7 +288,9 @@ export function createAuto({ config, backends, log = console.log, notify = null,
         try {
           const meta = await getMeta(b, ses.id);
           const list = Array.isArray(meta.hqCommitLines) ? meta.hqCommitLines : [];
-          if (!list.some((x) => x && x.turn === turnId)) await setMeta(b, ses.id, { hqCommitLines: [...list, { turn: turnId, line }] });
+          // A whole-copy review replaces earlier lines for the same turn: it has seen everything since.
+          if (whole) await setMeta(b, ses.id, { hqCommitLines: [...list.filter((x) => !(x && x.turn === turnId)), { turn: turnId, line, whole: true }] });
+          else if (!list.some((x) => x && x.turn === turnId)) await setMeta(b, ses.id, { hqCommitLines: [...list, { turn: turnId, line }] });
         } catch (e) { log(`auto ${ses.id}: could not save COMMIT line: ${e.message}`); }
       } else {
         log(`auto ${ses.id}: reviewer gave no COMMIT line; Apply will fall back to the chat title`);
@@ -300,6 +302,83 @@ export function createAuto({ config, backends, log = console.log, notify = null,
   }
 
   const busy = new Set(); // chats Auto is reviewing right now
+
+  /** Tokens in the chat's context now: the last measured step, or 0 when a compaction came after it (newest first). */
+  async function contextNow(b, sid) {
+    const msgs = (await call(b, "GET", `/session/${sid}/message?limit=30`)).data;
+    const i = msgs.findIndex((m) => (m.type === "assistant" && m.tokens) || m.type === "compaction");
+    const last = i >= 0 && msgs[i].type === "assistant" ? msgs[i] : null;
+    return last ? last.tokens.input + (last.tokens.cache?.read || 0) + last.tokens.output : 0;
+  }
+  /** Compact with the chat's CURRENT model and wait for it. Throws if it fails. */
+  async function compactAndWait(b, sid) {
+    const older = (await call(b, "GET", `/session/${sid}/message?limit=30`)).data.find((m) => m.type === "compaction")?.id;
+    await call(b, "POST", `/session/${sid}/compact`, {});
+    for (let i = 0; i < 72; i++) {
+      await new Promise((r) => setTimeout(r, 5000));
+      const c = (await call(b, "GET", `/session/${sid}/message?limit=30`)).data.find((m) => m.type === "compaction" && m.id !== older);
+      if (c?.status === "failed") throw new Error(`compaction failed: ${c.error?.message || "no reason given"}`);
+      if (c?.status === "completed") return;
+    }
+    throw new Error("compaction didn't finish within 6 minutes");
+  }
+  const contextLimit = async (b, ref) => {
+    if (!ref) return 0;
+    const models = (await call(b, "GET", `/model?location[directory]=${encodeURIComponent(b.chatsDir || b.home || "/")}`)).data;
+    return models.find((m) => m.id === ref.id && m.providerID === ref.providerID)?.limit?.context || 0;
+  };
+
+  /**
+   * One long turn can still outgrow the model's window: Auto compacts before sending a message, not during a turn. When
+   * an Auto chat's step fails with nothing written and the previous step held over 85% of that model's context, compact
+   * and carry on, at most once per chat in 10 minutes (a chat that keeps failing for another reason is left to you).
+   */
+  const recovered = new Map();
+  async function recoverFull(b, sid) {
+    try {
+      if (Date.now() - (recovered.get(sid) || 0) < 600_000) return;
+      const ses = (await call(b, "GET", `/session/${sid}`)).data;
+      if (!ses.metadata?.hqAuto) return;
+      const msgs = (await call(b, "GET", `/session/${sid}/message?limit=10`)).data; // newest first
+      const failed = msgs.find((m) => m.type === "assistant");
+      const wrote = failed?.content?.some((p) => p.type === "tool" || ((p.type === "text" || p.type === "reasoning") && p.text?.trim()));
+      if (!failed?.error || failed.error.type === "aborted" || wrote) return;
+      const prev = msgs.find((m) => m.type === "assistant" && m !== failed && m.tokens);
+      const ctx = prev ? prev.tokens.input + (prev.tokens.cache?.read || 0) + prev.tokens.output : 0;
+      const limit = await contextLimit(b, failed.model);
+      if (!limit || ctx < limit * 0.85) return;
+      recovered.set(sid, Date.now());
+      log(`auto ${sid}: a step failed at ${ctx} of ${limit} tokens (${failed.error.message}): compacting, then carrying on`);
+      try {
+        await compactAndWait(b, sid);
+      } catch (e) {
+        return log(`auto ${sid}: ${e.message}; leaving it to you`);
+      }
+      await routeAndSend(b, sid, "The chat ran out of room partway through your last step, so it was compacted. Carry on from where " +
+        "you were: check the current state (git status, the files you were changing) rather than relying on memory, and read only what you need.", true);
+    } catch (e) {
+      log(`auto ${sid}: recovering a full chat failed: ${e.message}`);
+    }
+  }
+
+  /**
+   * A copy chat is applied as ONE commit of everything in the copy, so its review covers the whole copy (the copy
+   * folder against the commit it started from, new files included), with the first request and later messages.
+   * Returns null for a chat that isn't a live copy: those keep reviewing the last turn.
+   */
+  async function wholeCopyScope(b, ses) {
+    const c = ses.metadata?.hqCopy;
+    if (!c?.worktree || c.applied || c.discarded) return null;
+    const msgs = (await call(b, "GET", `/session/${ses.id}/message?limit=200`)).data.reverse(); // oldest first
+    const users = msgs.filter((m) => m.type === "user" && !m.pending && (m.text || "").trim());
+    if (!users.length) return null;
+    const files = (await call(b, "GET", `/vcs/diff?mode=working&untracked=files&context=3&location[directory]=${encodeURIComponent(c.worktree)}`)).data;
+    const later = users.slice(1).slice(-5).map((m) => "- " + m.text.trim().replace(/\s+/g, " ").slice(0, 400));
+    const request = users[0].text.trim().slice(0, 2600) +
+      (later.length ? `\n\n(Later messages in the same chat${users.length > 6 ? ", the last five" : ""}:)\n${later.join("\n")}` : "") +
+      "\n\n(The change below is the WHOLE copy so far, which is what gets applied as one commit.)";
+    return { files, request };
+  }
 
   async function afterTurn(b, sid) {
     if (busy.has(sid)) return;
@@ -349,7 +428,10 @@ export function createAuto({ config, backends, log = console.log, notify = null,
         }
       }
 
-      const r = await reviewTurn(b, ses, start.id, String(meta.hqAutoRequest || start.text || ""), files);
+      const whole = await wholeCopyScope(b, ses).catch((e) => (log(`auto ${sid}: whole-copy review scope failed, reviewing the turn: ${e.message}`), null));
+      const r = whole?.files.length
+        ? await reviewTurn(b, ses, start.id, whole.request, whole.files, true)
+        : await reviewTurn(b, ses, start.id, String(meta.hqAutoRequest || start.text || ""), files);
       if (!r) return;
       const { pick, review } = r;
       const where = b.label || b.id;
@@ -404,9 +486,8 @@ export function createAuto({ config, backends, log = console.log, notify = null,
       pick = { ...pick, why: `${pick.why} · ${described ? "picture described by the vision model" : "picture left out (no vision model)"}` };
     }
     if (pick.role === "primary") {
-      const msgs = (await call(b, "GET", `/session/${sid}/message?limit=30`)).data;
-      const last = msgs.find((m) => m.type === "assistant" && m.tokens);
-      const ctx = last ? last.tokens.input + (last.tokens.cache?.read || 0) + last.tokens.output : 0;
+      // A compaction newer than the last measured step means that count is out of date: contextNow returns 0 then.
+      const ctx = await contextNow(b, sid);
       if (ctx > COMPACT_AT) {
         log(`auto ${sid}: ${ctx} tokens in context, compacting before the ${PRIMARY} turn`);
         await call(b, "POST", `/session/${sid}/compact`, {});
@@ -441,6 +522,7 @@ export function createAuto({ config, backends, log = console.log, notify = null,
             try {
               const ev = JSON.parse(line.slice(5));
               if (ev.type === "session.execution.succeeded") afterTurn(b, ev.data.sessionID);
+              else if (ev.type === "session.execution.failed") recoverFull(b, ev.data.sessionID);
             } catch { /* not JSON */ }
           }
         }
@@ -495,11 +577,34 @@ export function createAuto({ config, backends, log = console.log, notify = null,
       const pick = await routeAndSend(b, sid, text, false, files);
       return { label: pick.label, why: pick.why };
     },
+    /**
+     * Switch a chat to another model (picked by hand). When the chat already holds more than 80% of the new model's
+     * context, compact it FIRST with the current model, which can still read all of it, so the next step fits.
+     */
+    async switchModel(backendId, sid, ref) {
+      const b = backends.get(backendId);
+      if (!b) throw new Error("unknown machine");
+      const limit = await contextLimit(b, ref);
+      const ctx = await contextNow(b, sid);
+      let compacted = false;
+      if (limit && ctx > limit * 0.8) {
+        log(`switch ${sid}: ${ctx} tokens won't fit ${ref.providerID}/${ref.id} (${limit}): compacting with the current model first`);
+        await compactAndWait(b, sid);
+        compacted = true;
+      }
+      await call(b, "POST", `/session/${sid}/model`, { model: ref });
+      return { compacted, ctx, limit };
+    },
     /** Review one turn now (the review card's Yes), without the automatic fix round. */
     async review(backendId, sid, turnId) {
       const b = backends.get(backendId);
       if (!b) throw new Error("unknown machine");
       const ses = (await call(b, "GET", `/session/${sid}`)).data;
+      const whole = await wholeCopyScope(b, ses).catch(() => null);
+      if (whole?.files.length) {
+        reviewTurn(b, ses, turnId, whole.request, whole.files, true).catch((e) => log(`review ${sid}: ${e.message}`));
+        return { ok: true, whole: true };
+      }
       const msgs = (await call(b, "GET", `/session/${sid}/message?limit=200`)).data;
       const request = msgs.find((m) => m.id === turnId)?.text || "";
       const files = (await call(b, "GET", `/session/${sid}/diff?from=${turnId}&context=3`)).data;

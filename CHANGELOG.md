@@ -11,6 +11,10 @@
   saved, an untrusted host key, a missing permission, or a branch that just needs a pull. A GitHub
   remote's "Public/Private" badge now reads **Private or not found** when an unauthenticated call 404s. Read-only apart from
   the fetch and the connect: HQ never pushes from here.
+- Reviews of a copy chat cover the whole copy (what Apply commits), not just the last turn, and the newest review names
+  the commit.
+- Picking a smaller model for a big chat compacts it first, with the current model, so the next step fits.
+- When an Auto chat runs out of room partway through a turn, Auto compacts it and carries on (once per 10 minutes).
 - After an OpenCode server restarts, open pages reconnect and catch up instead of silently stopping updates
   (no new steps or approval prompts until reloaded).
 - Apply refuses a change that adds a git repository inside the project (a model's test fixtures or a stray

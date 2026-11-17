@@ -10,6 +10,8 @@ Behaviour, chosen from the last user message:
   "overflow" / "badkey" / "nocredit" / "ratelimit" -> the HTTP error a real server sends (exercises HQ's error help)
   HQ's "Try it" check (an hq_check tool) -> calls it, except under /notools/v1, which drops tools like a server
                        or key without tool calling does (exercises the "can't edit files" help)
+  "bigctx"          -> reports 120K tokens of context, then the next step is refused (HTTP 400, past the window)
+  "newfile"         -> writes src/extra.js (a second file in another turn: whole-copy reviews)
   anything else     -> short reasoning + a Markdown answer
 Requests without tools (title, summary) get a short plain answer.
 """
@@ -32,6 +34,9 @@ def text_of(m):
     return c or ""
 
 
+BIG = {"refused": False}  # the "bigctx" refusal happens once per mock run
+
+
 def plan(body):
     msgs = body.get("messages", [])
     tools = {t["function"]["name"]: t["function"] for t in body.get("tools") or []}
@@ -42,6 +47,11 @@ def plan(body):
             break
         since.append(m)
     tool_results = sum(1 for m in since if m["role"] == "tool")
+    if "## Next Move" in " ".join(text_of(m) for m in msgs):
+        # OpenCode's compaction prompt: it rejects a summary without its template's headings.
+        return [("text", "## Objective\nMock work.\n\n## Requirements\n- none\n\n## Decisions\n- none\n\n## Work State\n"
+                 "### Completed\n- mock\n\n### Active\n- none\n\n### Blocked\n- none\n\n## Next Move\nCarry on.\n\n"
+                 "## Relevant Files\n- hello.txt\n\n## Important Context\nMock summary.")]
     if not tools:
         everything = " ".join(text_of(m) for m in msgs).lower()
         return [("text", "Retry failed requests in fetchJson" if "fetchjson" in everything else "Mock session title")]
@@ -63,6 +73,18 @@ def plan(body):
                  "a retry can help:\n\n| Response | Retried? |\n|---|---|\n| 429 Too Many Requests | yes |\n| 500–599 server error | yes |\n"
                  "| 4xx (bad request, not found…) | no, it won't change |\n\nCallers don't change; pass `{ tries: 1 }` to turn it off:\n\n"
                  "```js\nconst user = await fetchJson(\"/api/user\", { tries: 1 });\n```")]
+    if "bigctx" in last_user and "read" in tools:
+        # Reports a nearly full context, then the next step is refused the way llama.cpp does past its window.
+        if tool_results == 0:
+            return [("usage", 120000), ("tool", "read", {"path": "README.md"})]
+        if not BIG["refused"]:
+            BIG["refused"] = True
+            return [("refuse", 131955)]
+        return [("text", "Done after the refusal.")]
+    if "newfile" in last_user and "write" in tools:
+        if tool_results == 0:
+            return [("tool", "write", {"path": "src/extra.js", "content": "export const extra = 1;\n"})]
+        return [("text", "Added src/extra.js.")]
     if "edit" in last_user:
         if tool_results == 0:
             return [("reasoning", "The user wants a file. I will create hello.txt first."),
@@ -152,6 +174,14 @@ class H(BaseHTTPRequestHandler):
         if os.environ.get("MOCK_DUMP") and body.get("tools"):
             json.dump(body, open(os.environ["MOCK_DUMP"], "w"), indent=1)  # DUMP: last request, for inspecting prompts
         steps = plan(body)
+        if steps and steps[0][0] == "refuse":
+            b = json.dumps({"error": {"code": 400, "type": "exceed_context_size_error",
+                            "message": f"request ({steps[0][1]} tokens) exceeds the available context size (131072 tokens)"}}).encode()
+            self.send_response(400); self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
+            return
+        prompt_tokens = next((st[1] for st in steps if st[0] == "usage"), 1593)
+        steps = [st for st in steps if st[0] != "usage"]
         self.send_response(200); self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache"); self.send_header("Connection", "close"); self.end_headers()
 
@@ -176,7 +206,7 @@ class H(BaseHTTPRequestHandler):
                                                 "function": {"name": step[1], "arguments": json.dumps(step[2])}}]}))
             send(chunk({}, finish))
             send({"id": "mock", "object": "chat.completion.chunk", "choices": [],
-                  "usage": {"prompt_tokens": 1593, "completion_tokens": 47, "total_tokens": 1640}})
+                  "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": 47, "total_tokens": prompt_tokens + 47}})
             self.wfile.write(b"data: [DONE]\n\n"); self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):
             pass

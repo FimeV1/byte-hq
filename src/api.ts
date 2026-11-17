@@ -44,6 +44,9 @@ export const hq = {
     call<{ ok: boolean; summary: string }>("/hq/copy/restart", { method: "POST", body: JSON.stringify({ backend, sessionID }) }),
   autoSend: (backend: string, sessionID: string, text: string, files?: { uri: string; name: string }[]) =>
     call<{ label: string; why: string }>("/hq/auto/send", { method: "POST", body: JSON.stringify({ backend, sessionID, text, files }) }),
+  /** Switch a chat's model; the server compacts it first (with the current model) when it wouldn't fit the new one. */
+  switchModel: (backend: string, sessionID: string, model: ModelRef) =>
+    call<{ compacted: boolean; ctx: number; limit: number }>("/hq/auto/switch-model", { method: "POST", body: JSON.stringify({ backend, sessionID, model }) }),
   autoReview: (backend: string, sessionID: string, turn: string) =>
     call("/hq/auto/review", { method: "POST", body: JSON.stringify({ backend, sessionID, turn }) }),
   modelChecks: (backend: string) => call<ModelChecks>(`/hq/models/checks?backend=${encodeURIComponent(backend)}`),

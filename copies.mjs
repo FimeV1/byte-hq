@@ -290,10 +290,11 @@ export function createCopies({ backends, projects, credit = {}, log = console.lo
       // The subject says what the change does. The independent reviewer saw the request and the whole
       // diff, so its line wins over the chat title, which goes stale when a chat changes topic
       // One line per reviewed turn; the first is the subject, the rest go in the body.
-      const reviewed = [...new Set((ses.metadata?.hqCommitLines || [])
-        .filter((l) => l && typeof l.line === "string" && l.line.trim())
-        .map((l) => commitLine(l.line)))]
-        .filter(Boolean);
+      const all = (ses.metadata?.hqCommitLines || []).filter((l) => l && typeof l.line === "string" && l.line.trim());
+      // A whole-copy review saw everything that's being applied, so the newest one names the commit on its own.
+      // Older per-turn lines keep the first-is-subject rule.
+      const wholeLines = all.filter((l) => l.whole);
+      const reviewed = [...new Set((wholeLines.length ? wholeLines.slice(-1) : all).map((l) => commitLine(l.line)))].filter(Boolean);
       const lines = reviewed.length ? reviewed : [commitLine(ses.title) || "change from HQ"];
       const test = ses.metadata?.hqTest;
       const credits = await coAuthors(b, ses).catch(() => []);

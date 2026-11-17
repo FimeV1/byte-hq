@@ -2,7 +2,7 @@
 // and call the exported actions. Updates are immutable, so a selector that returns an untouched
 // slice keeps its identity and the component does not re-render.
 import { useSyncExternalStore } from "react";
-import { api, eventsUrl, hq } from "./api";
+import { api, ApiError, eventsUrl, hq } from "./api";
 import type {
   AssistantMsg, Attachment, Backend, Form, TestResult, FileDiff, InboxItem, Model, ModelCheck, ModelChecks, MediaMakers, ModelRef, Msg, Part, PermissionRequest, PermissionRule, Project, SavedPrompt, Session, Space, UserMsg,
 } from "./types";
@@ -1119,7 +1119,17 @@ export function chooseModel(model: ModelRef) {
     return;
   }
   patchSession(c.sessionId, { model });
-  api.setModel(c.space.backend, c.sessionId, model).catch(fail("Could not switch model"));
+  const backend = c.space.backend, sid = c.sessionId;
+  // The server compacts first when the chat wouldn't fit the new model (that takes a minute or two): say so if slow.
+  const slow = window.setTimeout(() => toast("Compacting this chat with the current model first, so it fits the new one…", "info"), 1500);
+  hq.switchModel(backend, sid, model)
+    .then((r) => r.compacted && toast("Compacted, then switched model.", "ok"))
+    .catch((e) =>
+      e instanceof ApiError && e.status === 404 // Auto switched off in the config: no such route, switch directly
+        ? api.setModel(backend, sid, model).catch(fail("Could not switch model"))
+        : fail("Could not switch model")(e),
+    )
+    .finally(() => window.clearTimeout(slow));
 }
 
 export function setAllowAll(on: boolean) {

@@ -683,6 +683,7 @@ async function handle(req, res) {
       if (p === "/hq/auto/status") return json(res, 200, await auto.status(url.searchParams.get("backend")));
       const body = JSON.parse((await readBody(req, 32 << 20)).toString("utf8") || "{}");
       if (p === "/hq/auto/send" && req.method === "POST") return json(res, 200, await auto.send(body.backend, body.sessionID, body.text, body.files));
+      if (p === "/hq/auto/switch-model" && req.method === "POST") return json(res, 200, await auto.switchModel(body.backend, body.sessionID, body.model));
       if (p === "/hq/auto/review" && req.method === "POST") return json(res, 200, await auto.review(body.backend, body.sessionID, body.turn));
     } catch (e) {
       return json(res, 502, { message: e.message });
