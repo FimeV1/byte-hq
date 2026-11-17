@@ -47,6 +47,8 @@ For behaviour: `sh dev/run_dev_backend.sh`, then `sh dev/restart_hq.sh`, open ht
 - No inline `<script>` or `on…=` handlers: the Content-Security-Policy (server.mjs) blocks them.
 - Test fixtures that are git repos go under `dev/throwaway/` (git-ignored). A repo anywhere else in this tree gets
   committed as an embedded repo: check `git status --short` before you finish.
+- Screenshots and other test output go in `dev/throwaway/` too, never elsewhere in the tree: they show the folder
+  paths of whoever took them, and the leak checker can't read images.
 - In a copy, `NOTES.local.md` doesn't exist (it's git-ignored): don't go looking for it elsewhere.
 - Copies and Auto exist because models make mistakes: never weaken the copy guard, the review, or the permission
   rules to make something easier.
