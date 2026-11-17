@@ -6,7 +6,7 @@ import { BrowserPane } from "./BrowserPane";
 import { Sidebar } from "./Sidebar";
 import { EmptyChat, Thread } from "./Chat";
 import { Composer } from "./Composer";
-import { FolderBrowser, MachineDialog, NewChatDialog, NewProjectDialog, SettingsDialog, VaultDialog } from "./Modals";
+import { FolderBrowser, GitDialog, MachineDialog, NewChatDialog, NewProjectDialog, SettingsDialog, VaultDialog } from "./Modals";
 import { ModelsDialog } from "./ModelsDialog";
 import { ByteHelpDialog } from "./Help";
 import { PromptsDialog } from "./Prompts";
@@ -176,6 +176,7 @@ export function App() {
       {ui.modal === "prompts" && <PromptsDialog />}
       {ui.modal === "personal" && <PersonalDialog />}
       {ui.modal === "gallery" && <GalleryDialog />}
+      {ui.modal === "git" && <GitDialog />}
       <PrintView />
       {voiceOpen && <VoiceMode />}
       {ui.toast && <div className={"toast " + (ui.toastKind || "error")} role={ui.toastKind === "error" || !ui.toastKind ? "alert" : "status"}>{ui.toast}</div>}

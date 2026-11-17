@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { ArrowUp, ChevronRight, CircleCheck, Copy, Folder, FolderOpen, LoaderCircle, Monitor, Pencil, Plus, SquarePen } from "lucide-react";
+import { ArrowUp, ChevronRight, CircleCheck, Copy, Folder, FolderOpen, LoaderCircle, Monitor, Pencil, Plus, RefreshCw, SquarePen } from "lucide-react";
 import { api, hq } from "./api";
 import { chatsSpace, createProject, newChat, openMachine, openModal, openModels, projectSpace, toast, useStore } from "./store";
-import type { Backend, Machine, Space } from "./types";
+import type { Backend, GitStatus, Machine, Project, Space } from "./types";
 import { applyTheme, Dialog, savedTheme, type Theme } from "./ui";
 import { formatBytes } from "./Gallery";
 
@@ -216,6 +216,108 @@ function ThemeRow() {
   );
 }
 
+/** The state of one project in Settings › Git: a loaded GitStatus, an error, or still loading. */
+type GitRow = GitStatus | { error: string };
+const rowHasProblems = (r: GitRow | undefined) => (r !== undefined && ("error" in r || r.problems.length > 0));
+const fmtWhen = (ms: number | null) => {
+  if (!ms) return "";
+  const d = Date.now() - ms;
+  if (d < 3600e3) return `${Math.max(1, Math.round(d / 60e3))} min ago`;
+  if (d < 86400e3) return `${Math.round(d / 3600e3)} h ago`;
+  if (d < 7 * 86400e3) return `${Math.round(d / 86400e3)} days ago`;
+  return new Date(ms).toLocaleDateString();
+};
+
+/** Settings › Git: every project's repo, branch and sync state, grouped by machine.
+ *  HQ only reads state and (on request) fetches; pushing belongs to agents and terminals. */
+export function GitDialog() {
+  const projects = useStore((s) => s.projects);
+  const backends = useStore((s) => s.backends);
+  const [rows, setRows] = useState<Record<string, GitRow | undefined>>({});
+  const [needsOnly, setNeedsOnly] = useState(false);
+  const [busy, setBusy] = useState<Record<string, boolean>>({});
+  // Load every row at once; a slow or offline machine only delays its own rows.
+  useEffect(() => {
+    projects.forEach((p) =>
+      hq.gitStatus(p.id)
+        .then((s) => setRows((r) => ({ ...r, [p.id]: s })))
+        .catch((e) => setRows((r) => ({ ...r, [p.id]: { error: e instanceof Error ? e.message : String(e) } }))),
+    );
+  }, [projects]);
+  const refresh = (p: Project) => {
+    setBusy((b) => ({ ...b, [p.id]: true }));
+    hq.gitRefresh(p.id)
+      .then((s) => setRows((r) => ({ ...r, [p.id]: s })))
+      .catch((e) => toast(e instanceof Error ? e.message : String(e)))
+      .finally(() => setBusy((b) => ({ ...b, [p.id]: false })));
+  };
+  const shown = needsOnly ? projects.filter((p) => rowHasProblems(rows[p.id])) : projects;
+  return (
+    <Dialog title="Git" onClose={() => openModal(null)}>
+      <div className="seg" style={{ marginBottom: 12 }}>
+        <button type="button" className={!needsOnly ? "on" : ""} onClick={() => setNeedsOnly(false)}>All</button>
+        <button type="button" className={needsOnly ? "on" : ""} onClick={() => setNeedsOnly(true)}>Needs attention</button>
+      </div>
+      {projects.length === 0 && (
+        <div className="rowline">
+          <div className="grow">No projects yet.</div>
+          <button type="button" className="btn primary" onClick={() => openModal("newProject")}>Add one</button>
+        </div>
+      )}
+      {backends.map((b) => {
+        const mine = shown.filter((p) => p.backend === b.id);
+        if (!mine.length) return null;
+        return (
+          <div key={b.id} className="git-group">
+            <div className="git-machine"><Monitor size={14} />{b.label || b.id}</div>
+            <div className="rows">
+              {mine.map((p) => {
+                const r = rows[p.id];
+                const err = r && "error" in r;
+                return (
+                  <div className="rowline git-row" key={p.id}>
+                    <div className="grow">
+                      <span className="git-name">{p.name}</span>
+                      {r && !err && r.visibility !== "unknown" && (
+                        <span className={"badge " + (r.visibility === "public" ? "pub" : "priv")}>{r.visibility === "public" ? "Public" : "Private"}</span>
+                      )}
+                      {r && !err && r.isGit && r.branch && <span className="git-branch">{r.branch}</span>}
+                      <small>
+                        {!r && "Loading…"}
+                        {err && r.error}
+                        {r && !err && !r.isGit && p.directory}
+                        {r && !err && r.isGit && (
+                          <>
+                            {r.remote || "no remote"}
+                            {` · ${r.ahead || r.behind ? `${r.ahead} to push, ${r.behind} to pull` : "up to date"}`}
+                            {` · ${r.uncommitted ? `${r.uncommitted} uncommitted` : "clean"}`}
+                            {r.lastCommitAt ? ` · last commit ${fmtWhen(r.lastCommitAt)}` : ""}
+                          </>
+                        )}
+                      </small>
+                      {r && !err && r.problems.map((t) => (
+                        <div className="git-problem" key={t}>{t}</div>
+                      ))}
+                    </div>
+                    {r && !err && r.isGit && (
+                      <button type="button" className="icon-btn" disabled={!!busy[p.id]} onClick={() => refresh(p)} title="Fetch the remote" aria-label={`Fetch ${p.name}`}>
+                        {busy[p.id] ? <LoaderCircle size={15} className="spin" /> : <RefreshCw size={14} />}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+      <div className="notice" style={{ marginTop: 12 }}>
+        HQ only reads the state, and runs <code>git fetch</code> when you ask. Pushing happens in agents and terminals, which know their own rules.
+      </div>
+    </Dialog>
+  );
+}
+
 export function SettingsDialog() {
   const backends = useStore((s) => s.backends);
   const conn = useStore((s) => s.conn);
@@ -247,6 +349,13 @@ export function SettingsDialog() {
         ))}
       </div>
       <button type="button" className="btn" style={{ marginTop: 8 }} onClick={() => openMachine()}><Plus size={14} /> Add a machine</button>
+      <div className="field-label">Git</div>
+      <div className="rows">
+        <div className="rowline">
+          <div className="grow">Repos<small>Every project's branch, sync state and problems, in plain words.</small></div>
+          <button type="button" className="btn" onClick={() => openModal("git")}>Open</button>
+        </div>
+      </div>
       <div className="field-label">This device</div>
       <div className="rows">
         <ThemeRow />

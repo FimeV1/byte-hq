@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0
+- Settings › Git: every project's git state at a glance — whether the folder is a repository, its branch, its remote
+  (Public/Private for GitHub remotes), commits ahead of and behind the last fetch, uncommitted files, and the problems
+  in plain words ("no remote", "out of sync: 1 to push, 0 to pull", …). A "Needs attention" filter, a per-project
+  **Fetch** button, and machines that aren't answering shown as such. Read-only apart from the fetch: HQ never pushes
+  from here.
+
 ## 0.1.0 (first public release)
 - Chat with models on one or more OpenCode servers, from desktop or phone (installable, with notifications).
 - Project chats work on a git copy: test, review, then apply to the real project as one commit.

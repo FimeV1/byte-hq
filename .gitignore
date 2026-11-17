@@ -12,5 +12,6 @@ hq.pid
 NOTES.local.md
 dev/models/
 dev/media/
+dev/throwaway/
 dev/xdg/config/opencode/opencode.json
 dev/config.dev.json.bak

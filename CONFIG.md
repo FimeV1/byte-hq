@@ -116,6 +116,14 @@ HQ picks the model, reviews the work with a read-only reviewer, and sends fixes 
 - `compactAt`: tokens in context before a primary turn compacts the chat first.
 - `"auto": false` turns Auto off.
 
+## Git
+No setting to file: **Settings › Git** reads live state. For each project it shows whether the folder is a git
+repository, the current branch, the remote URL (any login in it is stripped before display), whether a GitHub remote
+is public or private (an unauthenticated GitHub API call, cached for ten minutes), the commits ahead of and behind
+the **last fetch**, the uncommitted files, the last commit, and the problems in plain words. A **Fetch** button per
+project runs `git fetch --prune` (30-second timeout); opening the section never fetches, and nothing here ever pushes.
+A machine that isn't answering shows *can't reach \<machine\>* for its own rows and blocks nothing else.
+
 ## Optional extras
 | Key | What |
 |---|---|

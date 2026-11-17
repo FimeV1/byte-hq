@@ -137,6 +137,16 @@ export type Backend = { id: string; label: string; home?: string; chatsDir?: str
 /** `test`: command run inside a copy before its change can be applied (Work on a copy). */
 export type Project = { id: string; name: string; backend: string; directory: string; test?: string };
 
+/** One project's git state as Settings › Git shows it (GET /hq/git/status). */
+export type GitStatus = {
+  id: string; name: string; backend: string;
+  isGit: boolean; branch: string | null; remote: string | null;
+  owner: string | null; repo: string | null;
+  visibility: "public" | "private" | "unknown";
+  ahead: number; behind: number; uncommitted: number;
+  lastCommitAt: number | null; hasGuard: boolean; problems: string[];
+};
+
 export type CopyInfo = {
   base: string; worktree: string; projectID: string; applied?: string; discarded?: boolean;
   /** Services the applied files belong to (from the project's restart map), offered as a Restart button. */

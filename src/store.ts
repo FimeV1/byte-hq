@@ -53,7 +53,7 @@ export type State = {
   copyTests: Record<string, TestResult | "running">;
   /** What Auto chose for a chat's last message, e.g. "Main model · it's available". */
   autoNote: Record<string, string>;
-  ui: { sidebar: boolean; panel: false | "browser" | "changes"; modal: null | "newProject" | "settings" | "newChat" | "vault" | "models" | "machine" | "byteHelp" | "prompts" | "personal" | "gallery"; modalBackend?: string; toast?: string; toastKind?: ToastKind };
+  ui: { sidebar: boolean; panel: false | "browser" | "changes"; modal: null | "newProject" | "settings" | "newChat" | "vault" | "models" | "machine" | "byteHelp" | "prompts" | "personal" | "gallery" | "git"; modalBackend?: string; toast?: string; toastKind?: ToastKind };
   /** "Try it" results per machine (Settings › Models), and which providers HQ added there. */
   checks: Record<string, ModelChecks>;
   /** Saved prompts for the / menu (follow you between devices). */

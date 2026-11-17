@@ -10,6 +10,7 @@
 //   /hq/config          -> app name + the backend list (no secrets)
 //   /hq/projects        -> GET / PUT the project list (a JSON file next to the config)
 //   /hq/machines        -> the machine list; /hq/machines/{test,save,remove} change it (machines.mjs)
+//   /hq/git/{status,refresh} -> Settings › Git: each project's git state (git.mjs)
 //   /hq/models/*        -> Settings › Models and the model Test (models.mjs)
 //   /hq/media/*         -> images and videos made with the Byte API: /make, and the saved files (models.mjs)
 //   everything else     -> the built UI in dist/ (index.html for unknown paths)
@@ -28,6 +29,7 @@ import { createAuto } from "./auto.mjs";
 import { createNotifier, watchForNotifications } from "./notify.mjs";
 import { createSearch } from "./search.mjs";
 import { createCopies } from "./copies.mjs";
+import { createGit } from "./git.mjs";
 import { createModels } from "./models.mjs";
 import { createMachines } from "./machines.mjs";
 
@@ -88,6 +90,8 @@ const notifier = config.push === false ? null : createNotifier({ configDir: path
 const readProjects = () => (fs.existsSync(PROJECTS_PATH) ? JSON.parse(fs.readFileSync(PROJECTS_PATH, "utf8")) : []);
 // "Work on a copy" (copies.mjs): worktree per chat, test there, apply only when tested.
 const copies = createCopies({ backends, projects: readProjects, credit: config.credit || {}, log: stamp });
+// Settings › Git: the git state of every project (git.mjs), read-only apart from the user's Refresh.
+const git = createGit({ backends, projects: readProjects, log: stamp });
 const pushLink = (b, sid, dir) => `/?open=${encodeURIComponent(JSON.stringify({ backend: b.id, sid, dir }))}`;
 const auto = config.auto === false ? null : createAuto({
   config, backends, log: stamp,
@@ -561,6 +565,25 @@ async function handle(req, res) {
       return json(res, 400, { message: e.message });
     }
     return send(res, 404, "");
+  }
+  if (p === "/hq/git/status" && req.method === "GET") {
+    try {
+      const project = url.searchParams.get("project");
+      if (!project) return json(res, 400, { message: "missing project" });
+      return json(res, 200, await git.status(project), { "Cache-Control": "no-store" });
+    } catch (e) {
+      stamp(`/hq/git/status failed: ${e.message}`);
+      return json(res, 400, { message: e.message });
+    }
+  }
+  if (p === "/hq/git/refresh" && req.method === "POST") {
+    try {
+      const body = JSON.parse((await readBody(req, 16 << 10)).toString("utf8") || "{}");
+      return json(res, 200, await git.refresh(String(body.project)), { "Cache-Control": "no-store" });
+    } catch (e) {
+      stamp(`/hq/git/refresh failed: ${e.message}`);
+      return json(res, 400, { message: e.message });
+    }
   }
   if (p.startsWith("/hq/models/")) {
     try {
