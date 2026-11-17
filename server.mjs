@@ -406,6 +406,12 @@ function relay(req, res, backend, rest) {
     if ((r.headers["content-type"] || "").includes("text/event-stream")) out["x-accel-buffering"] = "no";
     res.writeHead(r.statusCode || 502, out);
     r.pipe(res);
+    // pipe() only ends the browser's side when the backend ENDS its reply. When the backend dies instead (restart,
+    // crash), the reply is aborted, and the browser's event stream stayed open to nothing: the page went deaf (no
+    // steps, no permission prompts) until reloaded. Close it so the page reconnects and catches up.
+    r.on("aborted", () => res.destroy());
+    r.on("error", () => res.destroy());
+    r.on("close", () => !r.complete && res.destroy());
   });
   // A machine that's off (e.g. a desktop overnight) never answers the connection, and the OS waits ~75 s to give up.
   // Fail the CONNECT after 4 s instead; once connected, long replies and event streams are unaffected.

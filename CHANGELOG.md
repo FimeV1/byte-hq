@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- After an OpenCode server restarts, open pages reconnect and catch up instead of silently stopping updates
+  (no new steps or approval prompts until reloaded).
 - Apply refuses a change that adds a git repository inside the project (a model's test fixtures or a stray
   clone), which git would otherwise commit as a broken link.
 
