@@ -307,8 +307,8 @@ function GitConnectDialog({ project, onDone, onCancel }: { project: Project; onD
 // the user confirms. The server re-runs its own check on the same URL before anything runs.
 const URL_FORMS = [
   /^https:\/\/[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*(?::\d{1,5})?\/[A-Za-z0-9._~%/-]+$/i,
-  /^ssh:\/\/(?:[a-z0-9._-]+@)?[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*(?::\d{1,5})?\/[A-Za-z0-9._~%/-]+$/i,
-  /^[a-z0-9._-]+@[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*:[A-Za-z0-9._~%/-]+$/i,
+  /^ssh:\/\/(?:[a-z0-9][a-z0-9._-]*@)?[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*(?::\d{1,5})?\/[A-Za-z0-9._~%/-]+$/i,
+  /^[a-z0-9][a-z0-9._-]*@[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*:[A-Za-z0-9._~%/-]+$/i,
 ];
 function hqValidateUrl(u: string): string {
   const s = u.trim();

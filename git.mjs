@@ -61,8 +61,9 @@ export function validateRemoteUrl(u) {
   const path = "[A-Za-z0-9._~%/-]+";
   const forms = [
     new RegExp(`^https://${host}(?::\\d{1,5})?/${path}$`, "i"),
-    new RegExp(`^ssh://(?:[a-z0-9._-]+@)?${host}(?::\\d{1,5})?/${path}$`, "i"),
-    new RegExp(`^[a-z0-9._-]+@${host}:${path}$`, "i"),
+    new RegExp(`^ssh://(?:[a-z0-9][a-z0-9._-]*@)?${host}(?::\\d{1,5})?/${path}$`, "i"),
+    // A user name starts with a letter or digit: "-x@host" could reach ssh as an option, not a name.
+    new RegExp(`^[a-z0-9][a-z0-9._-]*@${host}:${path}$`, "i"),
   ];
   if (!forms.some((re) => re.test(s)))
     return "not a repo URL: use https://host/path, ssh://host/path, or user@host:path";
@@ -277,8 +278,6 @@ export function createGit({ backends, projects, log = console.log }) {
       "this machine's SSH key isn't accepted by that remote. Add the machine's public key to the account that pushes there."],
     [/(?:status 403|not authorized|insufficient [a-z ]*access|repository is not allowed|permission to push)/i,
       "this login can reach the remote but isn't allowed to push to that repo. Give the account push access to it."],
-    [/(?:workflow sign-off|requires workflow)/i,
-      "that repo requires workflow sign-off, and this login doesn't have it. Ask whoever administers the repo to grant it."],
   ];
 
   /**
@@ -300,7 +299,11 @@ export function createGit({ backends, projects, log = console.log }) {
       return { ok: false, why: "no remote named origin on this project yet — connect one first." };
     const r = await run(b, dir, envPrefix(dir) + "push --dry-run --no-verify origin HEAD", 60_000);
     if (r.exit === 0) {
-      return { ok: true, why: "login works on this machine for that remote. Nothing was pushed." };
+      // A dry run sends no files, so GitHub can't apply its rule that a token may only change .github/workflows files
+      // with the "workflow" permission: that refusal only shows up on a real push. Say so instead of implying it's covered.
+      const gh = githubParts(remote);
+      return { ok: true, why: "login works on this machine for that remote. Nothing was pushed." +
+        (gh ? " (One thing a dry run can't check: pushing changes to .github/workflows needs a token with the workflow permission.)" : "") };
     }
     if (r.exit === 124) {
       return { ok: false, why: `timed out after 60 s — nothing moved, and nothing was pushed. The remote or the connection is very slow.` };

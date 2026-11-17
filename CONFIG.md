@@ -129,8 +129,9 @@ A machine that isn't answering shows *can't reach \<machine\>* for its own rows 
   existing `origin`.
 - **Check login**: runs `git push --dry-run --no-verify origin HEAD` (it transfers nothing and runs no local hooks, and a
   60-second timeout is a failed check, never a hang) and explains the result in plain words — no login saved, the host key
-  isn't trusted, no push permission, a workflow sign-off is missing, or the branch is behind (a non-fast-forward still means
-  the login works; the branch just needs a pull or rebase).
+  isn't trusted, no push permission, or the branch is behind (a non-fast-forward still means the login works; the branch
+  just needs a pull or rebase). A dry run sends no files, so it can't check GitHub's rule that changing `.github/workflows`
+  needs a token with the workflow permission; that only shows up on a real push.
 
 ## Optional extras
 | Key | What |
