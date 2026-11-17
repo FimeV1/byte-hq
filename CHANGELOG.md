@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.1
+- **Idle compaction** (`auto.idleCompact`, off by default): big Auto chats are summarised while they sit idle, so the
+  next message doesn't re-read the whole chat on a local model whose cache has gone. Choose any model on that machine
+  to write the summary (`idleCompact.model`, e.g. a small one that's always loaded), or leave it to the chat's own
+  model; the chat keeps its own model afterwards. It never touches a running chat, waits while the summarising model
+  is busy, and never starts the primary for it. See CONFIG.md.
+- README › Keep it running: OpenCode now starts with the computer on Linux (systemd) and macOS (launchd) too, reading
+  its password from `~/.config/hq-app/opencode.env` instead of the service file; HQ's service waits for it.
+- Closing a steps log or card no longer leaves a grey, unpainted area in Safari until the next scroll.
+
 ## 0.3.0
 - **Windows.** HQ now runs on Windows 10 and 11, with a one-command installer for PowerShell:
   `irm https://raw.githubusercontent.com/FimeV1/byte-hq/main/install.ps1 | iex`. It does what the macOS/Linux one does

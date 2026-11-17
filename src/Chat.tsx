@@ -279,7 +279,11 @@ const TurnView = memo(
             onClick={() => {
               const next = !showLog;
               setOpen(next);
-              if (next) requestAnimationFrame(() => logEnd.current?.scrollIntoView({ block: "end", behavior: "smooth" }));
+              // Closing a long log shrinks the page under the reader: jump (not smooth-scroll) to this header, or the
+              // view can sit past the new end and stay blank until the next scroll.
+              requestAnimationFrame(() => next
+                ? logEnd.current?.scrollIntoView({ block: "end", behavior: "smooth" })
+                : head.current?.scrollIntoView({ block: "nearest" }));
             }}
             aria-expanded={showLog}
           >
@@ -297,7 +301,7 @@ const TurnView = memo(
             className="log-hide"
             onClick={() => {
               setOpen(false);
-              requestAnimationFrame(() => head.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }));
+              requestAnimationFrame(() => head.current?.scrollIntoView({ block: "nearest" }));
             }}
           >
             Hide steps
@@ -442,7 +446,25 @@ export function Thread({ sessionId }: { sessionId: string }) {
     const content = inner.current;
     if (!el || !content) return;
     const onScroll = () => (stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60);
-    const ro = new ResizeObserver(() => stick.current && (el.scrollTop = el.scrollHeight));
+    // When the content shrinks (a steps log or card closed), pull a view left past the new end back in, and work around
+    // Safari leaving the uncovered area grey until the next scroll: move 1px and back, and repaint the scroll area for
+    // one frame.
+    let lastH = content.offsetHeight;
+    const ro = new ResizeObserver(() => {
+      const h = content.offsetHeight, shrank = h < lastH;
+      lastH = h;
+      const max = el.scrollHeight - el.clientHeight;
+      if (stick.current) el.scrollTop = el.scrollHeight;
+      else if (el.scrollTop > max) el.scrollTop = max;
+      if (!shrank) return;
+      const t = el.scrollTop;
+      el.scrollTop = t > 0 ? t - 1 : t + 1;
+      el.style.transform = "translateZ(0)";
+      requestAnimationFrame(() => {
+        el.scrollTop = stick.current ? el.scrollHeight : t;
+        el.style.transform = "";
+      });
+    });
     el.addEventListener("scroll", onScroll, { passive: true });
     ro.observe(content);
     return () => (el.removeEventListener("scroll", onScroll), ro.disconnect());

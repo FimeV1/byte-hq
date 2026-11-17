@@ -105,7 +105,7 @@ const GUARD_TEMPLATE = (function () {
 const git = createGit({ backends, projects: readProjects, guardTemplate: GUARD_TEMPLATE, log: stamp });
 const pushLink = (b, sid, dir) => `/?open=${encodeURIComponent(JSON.stringify({ backend: b.id, sid, dir }))}`;
 const auto = config.auto === false ? null : createAuto({
-  config, backends, log: stamp,
+  config, backends, log: stamp, projects: readProjects,
   testCopy: (b, sid) => copies.test(b.id, sid),
   notify: notifier
     ? (b, sid, ses, text) => notifier.send("HQ", text, pushLink(b, sid, ses.location?.directory), `done-${sid}`).catch(() => {})

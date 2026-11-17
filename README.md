@@ -118,38 +118,72 @@ turn on notifications in **Settings**.
 ### Keep it running
 `./run_opencode.sh` starts an OpenCode server on this computer in the background (port 4096; its password is kept in
 `~/.config/hq-app/opencode.env`, readable only by you; log: `~/hq-opencode.log`), and `./run_hq.sh` starts HQ the same way
-(log: `~/hq-app.log`). Both keep running when you close the terminal, until the computer restarts. To start HQ with the computer:
+(log: `~/hq-app.log`). Both keep running when you close the terminal, until the computer restarts. To start them with
+the computer (paths assume the installer's defaults: OpenCode in `~/.opencode/bin`, HQ in `~/hq`; `which node` and
+`which opencode` show yours):
 
-<details><summary>Linux (systemd user service)</summary>
+<details><summary>Linux (systemd user services)</summary>
 
+```ini
+# ~/.config/systemd/user/hq-opencode.service
+[Unit]
+Description=OpenCode server for HQ
+After=network-online.target
+
+[Service]
+EnvironmentFile=%h/.config/hq-app/opencode.env
+ExecStart=%h/.opencode/bin/opencode serve --hostname 127.0.0.1 --port 4096
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
+```
 ```ini
 # ~/.config/systemd/user/hq.service
 [Unit]
 Description=HQ
-After=network-online.target
+After=network-online.target hq-opencode.service
+Wants=hq-opencode.service
 
 [Service]
-WorkingDirectory=/path/to/hq
+WorkingDirectory=%h/hq
 ExecStart=/usr/bin/node server.mjs
 Restart=on-failure
 
 [Install]
 WantedBy=default.target
 ```
-Then `systemctl --user enable --now hq` (and `loginctl enable-linger $USER` to keep it running after you log out).
+Stop the ones `run_opencode.sh` / `run_hq.sh` started first, then `systemctl --user enable --now hq-opencode hq` (and
+`loginctl enable-linger $USER` to keep them running after you log out). The password file is the one the installer
+(or `run_opencode.sh`) made.
 </details>
 
 <details><summary>macOS (launchd)</summary>
 
-Save as `~/Library/LaunchAgents/local.hq.plist`, fix the two paths (`which node` shows yours), then
-`launchctl load ~/Library/LaunchAgents/local.hq.plist`:
+Save these two files in `~/Library/LaunchAgents/`, fix the node path in the second (`which node`), stop the ones
+`run_opencode.sh` / `run_hq.sh` started, then `launchctl load ~/Library/LaunchAgents/local.hq-opencode.plist
+~/Library/LaunchAgents/local.hq.plist`. The first reads its password from the file the installer (or `run_opencode.sh`)
+made, so the password isn't written into the plist.
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>local.hq-opencode</string>
+  <key>ProgramArguments</key><array><string>/bin/sh</string><string>-c</string>
+    <string>set -a; . "$HOME/.config/hq-app/opencode.env"; exec "$HOME/.opencode/bin/opencode" serve --hostname 127.0.0.1 --port 4096</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/tmp/hq-opencode.log</string>
+  <key>StandardErrorPath</key><string>/tmp/hq-opencode.log</string>
+</dict></plist>
+```
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>Label</key><string>local.hq</string>
-  <key>WorkingDirectory</key><string>/path/to/hq</string>
-  <key>ProgramArguments</key><array><string>/usr/local/bin/node</string><string>server.mjs</string></array>
+  <key>ProgramArguments</key><array><string>/bin/sh</string><string>-c</string>
+    <string>cd "$HOME/hq" &amp;&amp; exec /usr/local/bin/node server.mjs</string></array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>StandardOutPath</key><string>/tmp/hq.log</string>

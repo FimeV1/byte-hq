@@ -47,7 +47,7 @@ const MAX_FIX_ROUNDS = 2;
 // Known ways around guard-type code, added to reviews of changes that match (see the file itself).
 const CHECKLISTS = path.join(path.dirname(new URL(import.meta.url).pathname), "review-checklists.md");
 
-export function createAuto({ config, backends, log = console.log, notify = null, testCopy = null }) {
+export function createAuto({ config, backends, log = console.log, notify = null, testCopy = null, projects = () => [] }) {
   const A = {
     // { providerID, modelID, label, health?: url, start?: shell command, busyCheck?: shell command,
     //   images?: boolean (can it see pictures), llamaServerUrl?: url (cache save/restore around reviews) }
@@ -57,6 +57,9 @@ export function createAuto({ config, backends, log = console.log, notify = null,
     vision: null, // { url: Ollama-style /api/chat URL, model } — describes pictures for a primary that can't see them
     compactAt: 90_000,
     midTurnAt: 0, // tokens partway through a turn that make Auto pause, compact and carry on; 0 = off (OpenCode's own compaction)
+    // Compact big Auto chats while they sit idle (off by default: it runs a model in the background, which costs money
+    // on a paid API). { afterMin, minTokens, everyMin, model: { providerID, modelID } }; model defaults to the chat's own.
+    idleCompact: false,
     fakeState: null,
     ...(config.auto || {}),
   };
@@ -388,17 +391,31 @@ export function createAuto({ config, backends, log = console.log, notify = null,
     const last = i >= 0 && msgs[i].type === "assistant" ? msgs[i] : null;
     return last ? last.tokens.input + (last.tokens.cache?.read || 0) + last.tokens.output : 0;
   }
-  /** Compact with the chat's CURRENT model and wait for it. Throws if it fails. */
-  async function compactAndWait(b, sid) {
-    const older = (await call(b, "GET", `/session/${sid}/message?limit=30`)).data.find((m) => m.type === "compaction")?.id;
-    await call(b, "POST", `/session/${sid}/compact`, {});
-    for (let i = 0; i < 72; i++) {
-      await new Promise((r) => setTimeout(r, 5000));
-      const c = (await call(b, "GET", `/session/${sid}/message?limit=30`)).data.find((m) => m.type === "compaction" && m.id !== older);
-      if (c?.status === "failed") throw new Error(`compaction failed: ${c.error?.message || "no reason given"}`);
-      if (c?.status === "completed") return;
+  /**
+   * Compact and wait for it. The summary is written by the chat's CURRENT model, or by `use` ({ id, providerID }) when
+   * given, in which case the chat's own model is put back afterwards. Throws if it fails.
+   */
+  async function compactAndWait(b, sid, use = null) {
+    const ses = use ? (await call(b, "GET", `/session/${sid}`)).data : null;
+    const swap = !!(use && ses?.model && (use.providerID !== ses.model.providerID || use.id !== (ses.model.id || ses.model.modelID)));
+    if (swap) {
+      log(`compact ${sid}: summarising with ${use.providerID}/${use.id} instead of ${ses.model.providerID}/${ses.model.id || ses.model.modelID}`);
+      await call(b, "POST", `/session/${sid}/model`, { model: use });
     }
-    throw new Error("compaction didn't finish within 6 minutes");
+    try {
+      const older = (await call(b, "GET", `/session/${sid}/message?limit=30`)).data.find((m) => m.type === "compaction")?.id;
+      await call(b, "POST", `/session/${sid}/compact`, {});
+      for (let i = 0; i < 72; i++) {
+        await new Promise((r) => setTimeout(r, 5000));
+        const c = (await call(b, "GET", `/session/${sid}/message?limit=30`)).data.find((m) => m.type === "compaction" && m.id !== older);
+        if (c?.status === "failed") throw new Error(`compaction failed: ${c.error?.message || "no reason given"}`);
+        if (c?.status === "completed") return;
+      }
+      throw new Error("compaction didn't finish within 6 minutes");
+    } finally {
+      if (swap) await call(b, "POST", `/session/${sid}/model`, { model: { id: ses.model.id || ses.model.modelID, providerID: ses.model.providerID } })
+        .catch((e) => log(`compact ${sid}: couldn't put the model back: ${e.message}`));
+    }
   }
   const contextLimit = async (b, ref) => {
     if (!ref) return 0;
@@ -662,6 +679,71 @@ export function createAuto({ config, backends, log = console.log, notify = null,
       midTurnRunning = false;
     }
   }
+  // ---- compact big chats while they're idle (auto.idleCompact) -----------------------------------------
+  // A model server's cache for an idle chat is gone after a while, so the next message re-reads the whole chat (slow on
+  // a local model). With auto.idleCompact set, an Auto chat idle for afterMin minutes and holding over minTokens is
+  // compacted in the background, so the next message starts small. The summary is written by idleCompact.model when
+  // set (any model on that machine, e.g. a cheap or always-loaded one), else by the chat's own model. Never a running
+  // chat; never while the summarising model is busy with another chat; never starts the primary for it (it must be up
+  // and not busy); one chat per pass; each idle stretch is tried once.
+  const IDLE = A.idleCompact ? { afterMin: 30, minTokens: 50_000, everyMin: 10, ...(typeof A.idleCompact === "object" ? A.idleCompact : {}) } : null;
+  let idleRunning = false;
+  const sameModel = (a, b) => a && b && a.providerID === b.providerID && (a.id || a.modelID) === (b.id || b.modelID);
+  async function idleCompactPass() {
+    if (idleRunning) return;
+    idleRunning = true;
+    try {
+      for (const b of backends.values()) {
+        if (b.removed) continue;
+        let active;
+        try { active = (await call1(b, "GET", "/session/active")).data || {}; } catch { continue; } // machine off
+        const busyModels = [];
+        for (const id of Object.keys(active)) {
+          const m = (await call1(b, "GET", `/session/${id}`).catch(() => null))?.data?.model;
+          if (m) busyModels.push(m);
+        }
+        let available = null; // the machine's model list, fetched once when needed
+        const dirs = new Set([b.chatsDir || b.home, ...projects().filter((p) => p.backend === b.id).map((p) => p.directory)].filter(Boolean));
+        for (const dir of dirs) {
+          const list = (await call1(b, "GET", `/session?limit=100&location[directory]=${encodeURIComponent(dir)}`).catch(() => null))?.data || [];
+          for (const ses of list) {
+            const meta = ses.metadata || {}, t = ses.time || {};
+            if (ses.parentID || !meta.hqAuto || active[ses.id] || !ses.model) continue;
+            if (meta.hqCopy?.applied || meta.hqCopy?.discarded) continue;
+            if (!t.idle || (t.busy || 0) > t.idle || Date.now() - t.idle < IDLE.afterMin * 60_000) continue;
+            if (meta.hqIdleCompactTried === t.idle) continue; // this idle stretch was already handled
+            const ctx = await contextNow(b, ses.id).catch(() => 0);
+            if (ctx < IDLE.minTokens) continue;
+            const want = IDLE.model?.providerID && (IDLE.model.modelID || IDLE.model.id)
+              ? { id: IDLE.model.modelID || IDLE.model.id, providerID: IDLE.model.providerID }
+              : { id: ses.model.id || ses.model.modelID, providerID: ses.model.providerID };
+            available ||= (await call(b, "GET", `/model?location[directory]=${encodeURIComponent(b.chatsDir || b.home || "/")}`).catch(() => ({ data: [] }))).data;
+            if (!available.some((m) => sameModel(m, want))) { log(`idle ${ses.id}: ${want.providerID}/${want.id} isn't on ${b.label || b.id}; skipped`); continue; }
+            if (busyModels.some((m) => sameModel(m, want))) continue; // try again next pass
+            if (sameModel(want, { id: A.primary?.modelID, providerID: A.primary?.providerID })) {
+              const st = await primaryState();
+              if (!st.up || st.busy) continue; // never start or interrupt the primary just for a summary
+            }
+            await setMeta(b, ses.id, { hqIdleCompactTried: t.idle });
+            log(`idle ${ses.id}: idle ${Math.round((Date.now() - t.idle) / 60_000)} min with ${ctx} tokens: compacting (summary by ${want.providerID}/${want.id})`);
+            try {
+              await compactAndWait(b, ses.id, want);
+              log(`idle ${ses.id}: compacted`);
+            } catch (e) {
+              log(`idle ${ses.id}: ${e.message}`);
+            }
+            return; // one per pass: the next pass re-checks what's busy
+          }
+        }
+      }
+    } catch (e) {
+      log(`idle compaction: ${e.message}`);
+    } finally {
+      idleRunning = false;
+    }
+  }
+  if (IDLE) setInterval(() => idleCompactPass().catch(() => {}), IDLE.everyMin * 60_000).unref?.();
+
   if (A.midTurnAt > 0) setInterval(() => midTurnPass().catch((e) => log(`mid-turn compaction: ${e.message}`)), 30_000).unref?.();
 
   const api = {

@@ -12,6 +12,7 @@ Behaviour, chosen from the last user message:
                        or key without tool calling does (exercises the "can't edit files" help)
   "bigctx"          -> reports 120K tokens of context, then the next step is refused (HTTP 400, past the window)
   "newfile"         -> writes src/extra.js (a second file in another turn: whole-copy reviews)
+  "idlebig"         -> answers normally but reports 8K tokens of context (exercises auto.idleCompact)
   "longturn"        -> reads README.md reporting 10K tokens (over the dev config's auto.midTurnAt, under OpenCode's own limit), then
                        streams slowly (exercises mid-turn compaction)
   "reviewbig" (with "edit") -> the main model's review is refused as too big (exercises the re-review on a bigger
@@ -125,6 +126,8 @@ def plan(body):
         if tool_results == 0:
             return [("usage", 10000), ("tool", "read", {"path": "README.md"})]
         return [("usage", 10200), ("slow", " ".join(f"word{i}" for i in range(400)))]
+    if "idlebig" in last_user:
+        return [("usage", 8000), ("text", "A big answer, as far as the token count goes.")]
     if "slow" in last_user:
         return [("slow", " ".join(f"word{i}" for i in range(400)))]
     return [("reasoning", "A simple question. Answer briefly with some Markdown."),

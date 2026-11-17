@@ -104,7 +104,9 @@ HQ picks the model, reviews the work with a read-only reviewer, and sends fixes 
   "vision":   { "url": "http://localhost:11434/api/chat", "model": "a-vision-model" },
   "compactAt": 90000,
   "midTurnAt": 0,
-  "checklists": "review-checklists.md"
+  "checklists": "review-checklists.md",
+  "idleCompact": { "afterMin": 30, "minTokens": 50000, "everyMin": 10,
+                   "model": { "providerID": "ollama", "modelID": "small-fast-model" } }
 }
 ```
 - **primary** does the work when it's available; **fallback** otherwise. Both name a model on your OpenCode servers.
@@ -123,6 +125,14 @@ HQ picks the model, reviews the work with a read-only reviewer, and sends fixes 
 - `checklists` (optional): the review checklist file (default: `review-checklists.md` next to `auto.mjs`). A review of
   a change that matches a section's `when:` pattern (push hooks, secret scanners, permission checks, logins…) must
   also try that section's known ways around such code.
+- `idleCompact` (optional, off by default): compact big Auto chats while they sit idle, so the next message doesn't
+  re-read the whole chat (a local model's cache for an idle chat is usually gone by then). A chat idle for `afterMin`
+  minutes (default 30) holding over `minTokens` (default 50,000) is summarised in the background, checked every
+  `everyMin` minutes (default 10), one chat at a time. `model` picks which model writes the summary: any model on that
+  machine, for example a smaller one that's always loaded; without it, the chat's own model does. The chat keeps its
+  own model afterwards. It never touches a running chat, waits while the summarising model is busy with another chat,
+  and never starts the primary for it. `"idleCompact": true` turns it on with the defaults. Off by default because
+  it runs a model in the background, which costs money on a paid API.
 - When a review runs out of room, it runs once more on the other Auto model if that one is available and has a bigger
   context window.
 - `"auto": false` turns Auto off.
