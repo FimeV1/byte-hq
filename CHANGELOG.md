@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.0
+- **Windows.** HQ now runs on Windows 10 and 11, with a one-command installer for PowerShell:
+  `irm https://raw.githubusercontent.com/FimeV1/byte-hq/main/install.ps1 | iex`. It does what the macOS/Linux one does
+  (OpenCode 2 is installed by OpenCode's own installer in Git Bash), never asks for admin rights and never changes
+  PowerShell settings. `run_opencode.ps1`, `run_hq.ps1` and `start_all.ps1` (for a Task Scheduler log-on task) start the
+  servers in the background; they keep running when the window closes.
+- **Fix: Apply, Test and Settings › Git on a Windows machine.** OpenCode runs commands on Windows through cmd.exe in a
+  way that hands quoted arguments to programs with their quotes still on (OpenCode 2.2.7 and 2.3.0), so Apply failed
+  at "making the patch" and Settings › Git's commands failed. HQ's own commands on Windows now go to PowerShell
+  (encoded, so cmd can't change them) with literal single-quoted arguments. Commands you write yourself (a project's
+  test command, release commands) still run exactly as typed. Tested with a project folder named `it's a proj`.
+- `npm run selftest -- --full` makes its test folder a git repository (OpenCode only tracks changes inside one), so
+  the diff and undo checks no longer fail on a fresh machine.
+
 ## 0.2.1
 - **One-command install** for macOS and Linux:
   `curl -fsSL https://raw.githubusercontent.com/FimeV1/byte-hq/main/install.sh | bash`. It checks git and Node.js,

@@ -7,6 +7,7 @@
 // same code works in a Windows shell.
 //
 // Session metadata: hqCopy = { base, worktree, projectID, guard, applied?, discarded? }, hqTest = last result.
+import { forShell, isWindows, qPosix, quoter } from "./shellq.mjs";
 
 /**
  * Permission rules that keep a copy chat out of the live project. OpenCode's tool for commands is `shell`
@@ -99,16 +100,16 @@ export function createCopies({ backends, projects, credit = {}, log = console.lo
     const meta = (await getSes(b, sid)).metadata || {};
     await call(b, "PATCH", `/session/${sid}`, { metadata: { ...meta, ...patch } });
   };
-  const isWindows = (dir) => /^[A-Za-z]:[\\/]/.test(dir);
-  // Quoting for commands run through a machine's shell. On Mac/Linux, double quotes still expand `...` and $(...),
-  // so a model-written chat title in the commit message could run a command (found 2026-11-15: a title with
-  // `persona_lock` in backticks was executed). Single quotes expand nothing there. Windows keeps double quotes.
-  const qPosix = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
-  const qWin = (s) => `"${String(s).replace(/"/g, '\\"')}"`;
-  const quoter = (dir) => (isWindows(dir) ? qWin : qPosix);
+  // Quoting and the Windows wrapper are in shellq.mjs. On Mac/Linux, double quotes still expand `...` and $(...), so
+  // a model-written chat title in the commit message could run a command (found 2026-11-15: a title with
+  // `persona_lock` in backticks was executed); single quotes expand nothing.
 
-  /** Run one command on that machine; returns {exit, output}. */
-  async function run(b, dir, command, timeoutMs = 600_000) {
+  /**
+   * Run one command on that machine; returns {exit, output}. HQ's own commands are wrapped for Windows (shellq.mjs);
+   * `raw` is for commands the user wrote (a project's test or release commands), which run exactly as typed.
+   */
+  async function run(b, dir, command, timeoutMs = 600_000, { raw = false } = {}) {
+    if (!raw) command = forShell(dir, command);
     const sh = (await call(b, "POST", `/shell?${loc(dir)}`, { command, cwd: dir, timeout: timeoutMs })).data;
     const t0 = Date.now();
     let st = sh;
@@ -239,7 +240,7 @@ export function createCopies({ backends, projects, credit = {}, log = console.lo
         steps.push({ name: "Python names and imports (pyflakes)", exit: fresh.length ? 1 : 0, output: out });
       }
       const test = project?.test;
-      if (test) steps.push({ name: "Project tests", ...(await run(b, wt, test)) });
+      if (test) steps.push({ name: "Project tests", ...(await run(b, wt, test, 600_000, { raw: true })) });
       const ok = steps.every((s) => s.exit === 0);
       const result = {
         ok, at: Date.now(), ran: steps.length, changed: changed.length,
@@ -285,7 +286,7 @@ export function createCopies({ backends, projects, credit = {}, log = console.lo
           "Ask the chat to delete them or move them into a git-ignored folder, then apply again.");
       }
       const patch = `${c.base.replace(/[\\/]+$/, "")}${isWindows(c.base) ? "\\" : "/"}.git${isWindows(c.base) ? "\\" : "/"}hq-apply.patch`;
-      await must(wt, `git diff --cached --binary HEAD --output=${q(patch)}`, "making the patch");
+      await must(wt, `git diff --cached --binary HEAD --output ${q(patch)}`, "making the patch");
       // Everything that can fail without touching the live project happens first.
       // The subject says what the change does. The independent reviewer saw the request and the whole
       // diff, so its line wins over the chat title, which goes stale when a chat changes topic
@@ -351,17 +352,17 @@ export function createCopies({ backends, projects, credit = {}, log = console.lo
       const R = project?.restart;
       if (!R) throw new Error("this project has no restart settings");
       if (R.check) {
-        const chk = await run(b, c.base, R.check, 60_000);
+        const chk = await run(b, c.base, R.check, 60_000, { raw: true });
         if (chk.exit !== 0) throw new Error(chk.output.trim().slice(-400) || "the safety check refused");
       }
       const results = [];
       for (const name of c.restart) {
-        const r = await run(b, c.base, R.commands[name], 180_000);
+        const r = await run(b, c.base, R.commands[name], 180_000, { raw: true });
         results.push({ name, exit: r.exit, output: r.output.trim().slice(-300) });
         if (r.exit !== 0) break;
       }
       let verify = null;
-      if (R.verify && results.every((r) => r.exit === 0)) verify = await run(b, c.base, R.verify, 120_000);
+      if (R.verify && results.every((r) => r.exit === 0)) verify = await run(b, c.base, R.verify, 120_000, { raw: true });
       const ok = results.every((r) => r.exit === 0) && (!verify || verify.exit === 0);
       const summary = ok
         ? `Restarted ${c.restart.join(", ")}${verify ? "; everything is back up" : ""}.`

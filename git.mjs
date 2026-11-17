@@ -15,6 +15,7 @@
 //   PowerShell: $env:GIT_TERMINAL_PROMPT='0'; $env:GIT_SSH_COMMAND='ssh …'; git …
 // (a `;` in PowerShell is how one line does two things — it is not the && chaining the rule bans).
 // The values are fixed strings written here, never user input.
+import { forShell, isWindows, quoter } from "./shellq.mjs";
 
 const GITHUB_API = "api.github.com";
 const VIS_TTL = 10 * 60 * 1000; // how long owner/repo visibility is cached (unauthenticated rate limit)
@@ -87,14 +88,13 @@ export function createGit({ backends, projects, guardTemplate = null, log = cons
     if (!b) throw new Error("unknown machine");
     return b;
   };
-  const isWindows = (dir) => /^[A-Za-z]:[\\/]/.test(dir);
-  // Same quoting as copies.mjs: single quotes expand nothing on Mac/Linux; Windows keeps double quotes.
-  const qPosix = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
-  const qWin = (s) => `"${String(s).replace(/"/g, '\\"')}"`;
-  const quoter = (dir) => (isWindows(dir) ? qWin : qPosix);
+  // Quoting and the Windows wrapper: shellq.mjs (same as copies.mjs). On Windows every command here goes to
+  // PowerShell (OpenCode's own cmd.exe hands quoted arguments over with their quotes), which is also why envPrefix
+  // uses PowerShell syntax there.
 
   /** Run one command on that machine; returns {exit, output}. */
   async function run(b, dir, command, timeoutMs = 60_000) {
+    command = forShell(dir, command);
     const sh = (await call(b, "POST", `/shell?${loc(dir)}`, { command, cwd: dir, timeout: timeoutMs })).data;
     const t0 = Date.now();
     let st = sh;

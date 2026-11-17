@@ -248,6 +248,12 @@ async function full() {
   }
   fs.mkdirSync(dir, { recursive: true });
   fs.rmSync(file, { force: true });
+  // OpenCode tracks changes (the per-turn diff, undo) only inside a git repository; a fresh test folder isn't one.
+  if (!fs.existsSync(path.join(dir, ".git"))) {
+    const { execFileSync } = await import("node:child_process");
+    execFileSync("git", ["init", "-q"], { cwd: dir });
+    execFileSync("git", ["-c", "user.name=HQ selftest", "-c", "user.email=selftest@localhost", "commit", "-q", "--allow-empty", "-m", "init"], { cwd: dir });
+  }
   let sid;
   let userId;
   await check(st, "an editing turn writes the file and streams to idle", async () => {

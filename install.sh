@@ -35,7 +35,7 @@ major_of() { "$1" --version 2>/dev/null | sed -n 's/^[^0-9]*\([0-9][0-9]*\)\..*/
 step "Checking this computer"
 case "$(uname -s)" in
   Darwin|Linux) ;;
-  *) die "this installer is for macOS and Linux (on Windows, use WSL or follow the README's steps)." ;;
+  *) die "this installer is for macOS and Linux. On Windows, run this in PowerShell instead: irm https://raw.githubusercontent.com/FimeV1/byte-hq/main/install.ps1 | iex" ;;
 esac
 command -v git > /dev/null || die "git is missing. macOS: run 'xcode-select --install'. Linux: install it with your package manager (e.g. sudo apt install git)."
 command -v node > /dev/null || die "Node.js is missing. Install Node.js 22 or newer from https://nodejs.org, then run this again."

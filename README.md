@@ -41,13 +41,21 @@ Run one OpenCode server on each computer you want to work on, and HQ puts them a
   across all chats, and a list of your important links and logins.
 
 ## Get started (about 5 minutes)
-You need [Node.js](https://nodejs.org) 22 or newer and git. On macOS or Linux, one command does the rest:
+You need [Node.js](https://nodejs.org) 22 or newer and git. Then one command does the rest.
+
+**macOS or Linux** (Terminal):
 ```sh
 curl -fsSL https://raw.githubusercontent.com/FimeV1/byte-hq/main/install.sh | bash
 ```
+**Windows 10 or 11** (PowerShell; git means [Git for Windows](https://git-scm.com/download/win), whose Git Bash runs
+OpenCode's installer):
+```powershell
+irm https://raw.githubusercontent.com/FimeV1/byte-hq/main/install.ps1 | iex
+```
 It installs [OpenCode](https://opencode.ai) 2 if you don't have it (and asks before replacing OpenCode 1), downloads
 HQ to `~/hq` (`HQ_DIR=…` to choose), starts an OpenCode server on this computer with a generated password, runs
-setup (which picks up that server by itself), builds HQ and offers to start it. It never uses `sudo`. Run it again
+setup (which picks up that server by itself), builds HQ and offers to start it. It never uses `sudo` or admin rights,
+and on Windows it doesn't change your PowerShell settings. Run it again
 to update. A new OpenCode comes with a few free cloud models, so you can try HQ before adding your own (Settings ›
 Models). Prefer to read it first? `curl -fsSLO https://raw.githubusercontent.com/FimeV1/byte-hq/main/install.sh`,
 then `bash install.sh`.
@@ -148,6 +156,15 @@ Save as `~/Library/LaunchAgents/local.hq.plist`, fix the two paths (`which node`
   <key>StandardErrorPath</key><string>/tmp/hq.log</string>
 </dict></plist>
 ```
+</details>
+
+<details><summary>Windows (Task Scheduler)</summary>
+
+`start_all.ps1` starts OpenCode and then HQ, both in the background. To run it when you log in: **Task Scheduler ›
+Create Basic Task**, trigger **When I log on**, action **Start a program**: program `powershell`, arguments
+`-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\Users\<you>\hq\start_all.ps1"`. To start them by hand:
+`powershell -ExecutionPolicy Bypass -File run_opencode.ps1`, then the same with `run_hq.ps1`. Both keep running when
+you close the window. Logs: `%USERPROFILE%\hq-opencode.log` and `%USERPROFILE%\hq-app.log`.
 </details>
 
 ### Updating
